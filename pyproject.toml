@@ -1,0 +1,23 @@
+[project]
+name = "SAMhera"
+version = "1.0.0"
+description = "VLM-powered auto prompting for SAM3 in ComfyUI"
+authors = [{ name = "SAMhera" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "google-genai>=1.0.0",
+    "openai>=1.0.0",
+    "Pillow",
+    "numpy",
+]
+
+[project.urls]
+Homepage = "https://github.com/SAMhera/SAMhera"
+
+[tool.comfy]
+PublisherId = "SAMhera"
+DisplayName = "SAMhera"
+Icon = ""
