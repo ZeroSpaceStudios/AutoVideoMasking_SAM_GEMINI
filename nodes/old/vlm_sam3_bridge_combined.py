@@ -571,13 +571,13 @@ class VLMImageTest:
 
 
 # =============================================================================
-# VLMtoBBoxAndPoints — single API call: bbox + points in one shot
+# VLMtoBBoxAndPoints — single API call for bbox + points (consistent coords)
 # =============================================================================
 
 class VLMtoBBoxAndPoints:
     """
-    Single VLM call returning bbox AND points together.
-    Consistent coordinates — same reasoning context for both.
+    Single VLM call that returns bbox AND points together.
+    Guarantees consistency between box and points — same image reasoning context.
     """
 
     @classmethod
@@ -604,9 +604,9 @@ class VLMtoBBoxAndPoints:
     def run(self, image, target_description, num_pos_points, num_neg_points,
             is_positive, api=None, few_shot_examples=""):
 
-        api_key    = api["api_key"]                           if api else ""
-        provider   = api["provider"]                          if api else "gemini"
-        model_name = api.get("model_name", "gemini-2.5-pro")  if api else "gemini-2.5-pro"
+        api_key    = api["api_key"]                          if api else ""
+        provider   = api["provider"]                         if api else "gemini"
+        model_name = api.get("model_name", "gemini-2.5-pro") if api else "gemini-2.5-pro"
 
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
@@ -624,13 +624,14 @@ class VLMtoBBoxAndPoints:
             f"3. Place {num_neg_points} negative point(s) on anything that is NOT {target_description} — "
             "near its boundary, visually similar regions.\n\n"
             "Return ONLY this JSON (no explanation, no markdown):\n"
-            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}' 
+            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}'
             + few_shot_block
         )
 
         raw = _call_vlm(pil_img, prompt, api_key, provider, model_name)
         print(f"[VLMtoBBoxAndPoints] Raw: {raw}")
 
+        # --- parse ---
         try:
             data = _parse_json(raw)
             x1, y1, x2, y2 = data["bbox"]
@@ -645,7 +646,7 @@ class VLMtoBBoxAndPoints:
         pos_raw = pos_raw[:num_pos_points]
         neg_raw = neg_raw[:num_neg_points]
 
-        # bbox → normalized center format
+        # --- bbox ---
         x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
         cx = (x1n + x2n) / 2;  cy = (y1n + y2n) / 2
         bw = x2n - x1n;        bh = y2n - y1n
@@ -653,19 +654,20 @@ class VLMtoBBoxAndPoints:
         box_prompt   = {"box":   [cx, cy, bw, bh], "label": is_positive}
         boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [is_positive]}
 
-        # points → normalized
-        def to_norm(pts, label_val):
-            result, lbls = [], []
+        # --- points (relative to full image — no crop needed, bbox already consistent) ---
+        def to_norm_points(pts, label_val):
+            result_pts, lbls = [], []
             for pt in pts:
                 nx = max(0.0, min(1.0, pt[0] / W if pt[0] > 1.5 else pt[0]))
                 ny = max(0.0, min(1.0, pt[1] / H if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny]); lbls.append(label_val)
-            return {"points": result, "labels": lbls}
+                result_pts.append([nx, ny])
+                lbls.append(label_val)
+            return {"points": result_pts, "labels": lbls}
 
-        positive_points = to_norm(pos_raw, 1)
-        negative_points = to_norm(neg_raw, 0)
+        positive_points = to_norm_points(pos_raw, 1)
+        negative_points = to_norm_points(neg_raw, 0)
 
-        print(f"[VLMtoBBoxAndPoints] box: [{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}]")
+        print(f"[VLMtoBBoxAndPoints] box (cx,cy,w,h): [{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}]")
         print(f"[VLMtoBBoxAndPoints] pos ({len(positive_points['points'])}): {positive_points['points']}")
         print(f"[VLMtoBBoxAndPoints] neg ({len(negative_points['points'])}): {negative_points['points']}")
 

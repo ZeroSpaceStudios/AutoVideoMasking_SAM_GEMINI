@@ -26,14 +26,15 @@ from PIL import Image
 # =============================================================================
 
 class SAMheraAPIKey:
-    """Enter API key and provider once, connect to all SAMhera nodes via the api slot."""
+    """Enter API key, provider, and model once — connect to all SAMhera nodes via the api slot."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "api_key":  ("STRING",   {"default": "", "multiline": False}),
-                "provider": (["gemini", "openai"], {"default": "gemini"}),
+                "api_key":    ("STRING", {"default": "", "multiline": False}),
+                "provider":   (["gemini", "openai"], {"default": "gemini"}),
+                "model_name": (["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini"], {"default": "gemini-2.5-pro"}),
             }
         }
 
@@ -42,8 +43,8 @@ class SAMheraAPIKey:
     FUNCTION      = "run"
     CATEGORY      = "SAMhera"
 
-    def run(self, api_key, provider):
-        return ({"api_key": api_key, "provider": provider},)
+    def run(self, api_key, provider, model_name):
+        return ({"api_key": api_key, "provider": provider, "model_name": model_name},)
 
 
 # -- helpers ------------------------------------------------------------------
@@ -153,6 +154,7 @@ class VLMtoBBox:
             target_description, is_positive, few_shot_examples="", confidence_hint=1.0, api=None):
         if api is not None:
             api_key = api["api_key"]; provider = api["provider"]
+            if api.get("model_name"): model_name = api["model_name"]
 
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
@@ -234,6 +236,7 @@ class VLMtoPoints:
 
         if api is not None:
             api_key = api["api_key"]; provider = api["provider"]
+            if api.get("model_name"): model_name = api["model_name"]
 
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
@@ -349,6 +352,7 @@ class VLMtoMultiBBox:
             target_description, max_objects, few_shot_examples="", api=None):
         if api is not None:
             api_key = api["api_key"]; provider = api["provider"]
+            if api.get("model_name"): model_name = api["model_name"]
 
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
@@ -543,8 +547,8 @@ class VLMImageTest:
             },
         }
 
-    RETURN_TYPES  = ("STRING", "SAMHERA_API", "STRING", "STRING", "STRING")
-    RETURN_NAMES  = ("description", "api", "api_key", "provider", "model_name")
+    RETURN_TYPES  = ("STRING", "SAMHERA_API")
+    RETURN_NAMES  = ("description", "api")
     FUNCTION      = "run"
     CATEGORY      = "SAMhera"
     OUTPUT_NODE   = True
@@ -562,118 +566,15 @@ class VLMImageTest:
 
         raw = _call_vlm(pil_img, prompt, api_key, provider, model_name)
         print(f"[VLMImageTest] Response: {raw}")
-        return (raw, {"api_key": api_key, "provider": provider}, api_key, provider, model_name)
+        return (raw, {"api_key": api_key, "provider": provider, "model_name": model_name})
 
 
 # =============================================================================
 # Registration
 # =============================================================================
 
-
-# =============================================================================
-# VLMtoBBoxAndPoints — single API call: bbox + points in one shot
-# =============================================================================
-
-class VLMtoBBoxAndPoints:
-    """
-    Single VLM call returning bbox AND points together.
-    Consistent coordinates — same reasoning context for both.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "target_description": ("STRING", {"default": "the main subject", "multiline": False}),
-                "num_pos_points": ("INT", {"default": 6, "min": 1, "max": 12}),
-                "num_neg_points": ("INT", {"default": 3, "min": 0, "max": 6}),
-                "is_positive": ("BOOLEAN", {"default": True}),
-            },
-            "optional": {
-                "api": ("SAMHERA_API",),
-                "few_shot_examples": ("STRING", {"default": "", "multiline": True}),
-            }
-        }
-
-    RETURN_TYPES  = ("SAM3_BOX_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_POINTS_PROMPT", "SAM3_POINTS_PROMPT", "STRING")
-    RETURN_NAMES  = ("box_prompt", "boxes_prompt", "positive_points", "negative_points", "raw_vlm_response")
-    FUNCTION      = "run"
-    CATEGORY      = "SAMhera"
-
-    def run(self, image, target_description, num_pos_points, num_neg_points,
-            is_positive, api=None, few_shot_examples=""):
-
-        api_key    = api["api_key"]                           if api else ""
-        provider   = api["provider"]                          if api else "gemini"
-        model_name = api.get("model_name", "gemini-2.5-pro")  if api else "gemini-2.5-pro"
-
-        pil_img = _tensor_to_pil(image)
-        W, H = pil_img.size
-
-        few_shot_block = ""
-        if few_shot_examples.strip():
-            few_shot_block = "\n\nReference examples:\n" + few_shot_examples.strip()
-
-        prompt = (
-            f"Segment: {target_description}\n"
-            f"Image: {W}x{H} pixels.\n\n"
-            "1. Draw a tight bounding box around the target.\n"
-            f"2. Place {num_pos_points} positive point(s) ON the {target_description} — "
-            "spread across its full extent, deep inside, never on edges.\n"
-            f"3. Place {num_neg_points} negative point(s) on anything that is NOT {target_description} — "
-            "near its boundary, visually similar regions.\n\n"
-            "Return ONLY this JSON (no explanation, no markdown):\n"
-            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}' 
-            + few_shot_block
-        )
-
-        raw = _call_vlm(pil_img, prompt, api_key, provider, model_name)
-        print(f"[VLMtoBBoxAndPoints] Raw: {raw}")
-
-        try:
-            data = _parse_json(raw)
-            x1, y1, x2, y2 = data["bbox"]
-            pos_raw = data.get("positive", [[W//2, H//2]])
-            neg_raw = data.get("negative", [])
-        except Exception as e:
-            print(f"[VLMtoBBoxAndPoints] Parse error: {e} — using fallbacks")
-            x1, y1, x2, y2 = 0, 0, W, H
-            pos_raw = [[W//2, H//2]]
-            neg_raw = []
-
-        pos_raw = pos_raw[:num_pos_points]
-        neg_raw = neg_raw[:num_neg_points]
-
-        # bbox → normalized center format
-        x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
-        cx = (x1n + x2n) / 2;  cy = (y1n + y2n) / 2
-        bw = x2n - x1n;        bh = y2n - y1n
-
-        box_prompt   = {"box":   [cx, cy, bw, bh], "label": is_positive}
-        boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [is_positive]}
-
-        # points → normalized
-        def to_norm(pts, label_val):
-            result, lbls = [], []
-            for pt in pts:
-                nx = max(0.0, min(1.0, pt[0] / W if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1] / H if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny]); lbls.append(label_val)
-            return {"points": result, "labels": lbls}
-
-        positive_points = to_norm(pos_raw, 1)
-        negative_points = to_norm(neg_raw, 0)
-
-        print(f"[VLMtoBBoxAndPoints] box: [{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}]")
-        print(f"[VLMtoBBoxAndPoints] pos ({len(positive_points['points'])}): {positive_points['points']}")
-        print(f"[VLMtoBBoxAndPoints] neg ({len(negative_points['points'])}): {negative_points['points']}")
-
-        return (box_prompt, boxes_prompt, positive_points, negative_points, raw)
-
 NODE_CLASS_MAPPINGS = {
     "SAMheraAPIKey":   SAMheraAPIKey,
-    "VLMtoBBoxAndPoints": VLMtoBBoxAndPoints,
     "VLMtoBBox":       VLMtoBBox,
     "VLMtoPoints":     VLMtoPoints,
     "VLMtoMultiBBox":  VLMtoMultiBBox,
@@ -684,7 +585,6 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SAMheraAPIKey":   "SAMhera API Key",
-    "VLMtoBBoxAndPoints": "VLM -> BBox + Points (SAMhera)",
     "VLMtoBBox":       "VLM -> BBox (SAMhera)",
     "VLMtoPoints":     "VLM -> Points (SAMhera)",
     "VLMtoMultiBBox":  "VLM -> Multi-BBox (SAMhera)",
