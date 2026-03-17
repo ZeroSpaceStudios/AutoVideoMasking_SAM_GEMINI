@@ -798,44 +798,6 @@ class SAMheraPasteBackMask:
         return (full,)
 
 
-NODE_CLASS_MAPPINGS = {
-    "SAMheraAPIKey":          SAMheraAPIKey,
-    "VLMtoBBoxAndPoints":     VLMtoBBoxAndPoints,
-    "VLMtoBBox":              VLMtoBBox,
-    "VLMtoPoints":            VLMtoPoints,
-    "VLMtoMultiBBox":         VLMtoMultiBBox,
-    "VLMBBoxPreview":         VLMBBoxPreview,
-    "VLMDebugPreview":        VLMDebugPreview,
-    "VLMImageTest":           VLMImageTest,
-    "SAMheraReload":          SAMheraReload,
-    "SAMheraAddFramePrompt":  SAMheraAddFramePrompt,
-    "VLMFacePartsBBox":       VLMFacePartsBBox,
-    "SAMheraCropByBox":       SAMheraCropByBox,
-    "SAMheraPasteBackMask":   SAMheraPasteBackMask,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAMheraAPIKey":          "SAMhera API Key",
-    "VLMtoBBoxAndPoints":     "VLM -> BBox + Points (SAMhera)",
-    "VLMtoBBox":              "VLM -> BBox (SAMhera)",
-    "VLMtoPoints":            "VLM -> Points (SAMhera)",
-    "VLMtoMultiBBox":         "VLM -> Multi-BBox (SAMhera)",
-    "VLMBBoxPreview":         "VLM BBox Preview (SAMhera)",
-    "VLMDebugPreview":        "VLM Debug Preview (SAMhera)",
-    "VLMImageTest":           "VLM Image Test (SAMhera)",
-    "SAMheraReload":          "SAMhera Reload",
-    "SAMheraAddFramePrompt":  "Add Frame Prompt [SAMhera]",
-    "VLMFacePartsBBox":       "VLM -> Face Parts BBox [SAMhera]",
-    "SAMheraCropByBox":       "Crop by Box [SAMhera]",
-    "SAMheraPasteBackMask":   "Paste Back Mask [SAMhera]",
-}
-
-
-# =============================================================================
-# Node 7 -- SAMheraReload
-#   Hot-reloads vlm_sam3_bridge.py without restarting ComfyUI
-# =============================================================================
-
 class SAMheraReload:
     """
     Reloads SAMhera node code instantly — no ComfyUI restart needed.
@@ -891,8 +853,6 @@ class SAMheraReload:
         return (status,)
 
 
-NODE_CLASS_MAPPINGS["SAMheraReload"] = SAMheraReload
-NODE_DISPLAY_NAME_MAPPINGS["SAMheraReload"] = "SAMhera Reload"
 
 
 # =============================================================================
@@ -1032,8 +992,6 @@ class SAMheraAddFramePrompt:
         return (video_state,)
 
 
-NODE_CLASS_MAPPINGS["SAMheraAddFramePrompt"] = SAMheraAddFramePrompt
-NODE_DISPLAY_NAME_MAPPINGS["SAMheraAddFramePrompt"] = "Add Frame Prompt [SAMhera]"
 
 FACE_PARTS = ["hair", "face", "neck", "face_neck", "clothing"]
 
@@ -1166,6 +1124,38 @@ class VLMFacePartsBBox:
             raw,
         )
 
+# =============================================================================
+# Registration — all classes defined above, single dict at bottom
+# =============================================================================
 
-NODE_CLASS_MAPPINGS["VLMFacePartsBBox"] = VLMFacePartsBBox
-NODE_DISPLAY_NAME_MAPPINGS["VLMFacePartsBBox"] = "VLM -> Face Parts BBox [SAMhera]"
+NODE_CLASS_MAPPINGS = {
+    "SAMheraAPIKey":          SAMheraAPIKey,
+    "VLMtoBBoxAndPoints":     VLMtoBBoxAndPoints,
+    "VLMtoBBox":              VLMtoBBox,
+    "VLMtoPoints":            VLMtoPoints,
+    "VLMtoMultiBBox":         VLMtoMultiBBox,
+    "VLMBBoxPreview":         VLMBBoxPreview,
+    "VLMDebugPreview":        VLMDebugPreview,
+    "VLMImageTest":           VLMImageTest,
+    "SAMheraReload":          SAMheraReload,
+    "SAMheraAddFramePrompt":  SAMheraAddFramePrompt,
+    "VLMFacePartsBBox":       VLMFacePartsBBox,
+    "SAMheraCropByBox":       SAMheraCropByBox,
+    "SAMheraPasteBackMask":   SAMheraPasteBackMask,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "SAMheraAPIKey":          "SAMhera API Key",
+    "VLMtoBBoxAndPoints":     "VLM -> BBox + Points (SAMhera)",
+    "VLMtoBBox":              "VLM -> BBox (SAMhera)",
+    "VLMtoPoints":            "VLM -> Points (SAMhera)",
+    "VLMtoMultiBBox":         "VLM -> Multi-BBox (SAMhera)",
+    "VLMBBoxPreview":         "VLM BBox Preview (SAMhera)",
+    "VLMDebugPreview":        "VLM Debug Preview (SAMhera)",
+    "VLMImageTest":           "VLM Image Test (SAMhera)",
+    "SAMheraReload":          "SAMhera Reload",
+    "SAMheraAddFramePrompt":  "Add Frame Prompt [SAMhera]",
+    "VLMFacePartsBBox":       "VLM -> Face Parts BBox [SAMhera]",
+    "SAMheraCropByBox":       "Crop by Box [SAMhera]",
+    "SAMheraPasteBackMask":   "Paste Back Mask [SAMhera]",
+}
