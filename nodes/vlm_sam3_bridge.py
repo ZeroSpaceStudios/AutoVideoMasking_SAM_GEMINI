@@ -744,7 +744,7 @@ class SAMheraPasteBackMask:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "masks":     ("VIDEO",),
+                "masks":     ("MASK",),
                 "crop_meta": ("CROP_META",),
             },
             "optional": {
