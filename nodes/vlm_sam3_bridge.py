@@ -756,3 +756,158 @@ class SAMheraReload:
 
 NODE_CLASS_MAPPINGS["SAMheraReload"] = SAMheraReload
 NODE_DISPLAY_NAME_MAPPINGS["SAMheraReload"] = "SAMhera Reload"
+
+
+# =============================================================================
+# SAMheraAddFramePrompt
+# Adds point or box prompts to an existing SAM3_VIDEO_STATE at a target frame.
+# Chain after SAM3VideoSegmentation to re-anchor tracking mid/end frames,
+# reducing propagation drift on long or fast-moving videos.
+#
+# Chain pattern:
+#   SAM3VideoSegmentation (frame 0)
+#     -> SAMheraAddFramePrompt (frame N//2)
+#     -> SAMheraAddFramePrompt (frame N-1)
+#     -> SAM3Propagate
+# =============================================================================
+
+class SAMheraAddFramePrompt:
+    """
+    [SAMhera] Add point or box prompts to an existing SAM3_VIDEO_STATE at a specific frame.
+
+    Use after SAM3VideoSegmentation to re-anchor tracking at mid/end frames,
+    reducing propagation drift on long or fast-moving videos.
+
+    Connect VLMtoBBoxAndPoints (or VLMtoPoints) output for each anchor frame,
+    then chain the video_state output into SAM3Propagate.
+
+    Requires ComfyUI-SAM3 installed (provides SAM3_VIDEO_STATE type).
+    """
+
+    PROMPT_MODES = ["point", "box"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_state": ("SAM3_VIDEO_STATE", {
+                    "tooltip": "Video state from SAM3VideoSegmentation or a previous SAMheraAddFramePrompt"
+                }),
+                "prompt_mode": (cls.PROMPT_MODES, {
+                    "default": "point",
+                    "tooltip": "point: normalized (x,y) SAM3_POINTS_PROMPT | box: SAM3_BOXES_PROMPT"
+                }),
+                "frame_idx": ("INT", {
+                    "default": 15,
+                    "min": 0,
+                    "tooltip": "Frame to anchor. For a 30-frame clip: 14=mid, 29=end."
+                }),
+                "obj_id": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "tooltip": "Object ID to re-anchor. Must match SAM3VideoSegmentation (default=1)."
+                }),
+            },
+            "optional": {
+                "positive_points": ("SAM3_POINTS_PROMPT", {
+                    "tooltip": "[point mode] Foreground points at this frame. Connect from VLMtoBBoxAndPoints or VLMtoPoints."
+                }),
+                "negative_points": ("SAM3_POINTS_PROMPT", {
+                    "tooltip": "[point mode] Background exclusion points at this frame."
+                }),
+                "positive_boxes": ("SAM3_BOXES_PROMPT", {
+                    "tooltip": "[box mode] Bounding box around the target at this frame. Connect from VLMtoBBox or VLMtoBBoxAndPoints."
+                }),
+                "negative_boxes": ("SAM3_BOXES_PROMPT", {
+                    "tooltip": "[box mode] Bounding box region to exclude at this frame."
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("SAM3_VIDEO_STATE",)
+    RETURN_NAMES = ("video_state",)
+    FUNCTION = "add_frame_prompt"
+    CATEGORY = "SAMhera"
+
+    def add_frame_prompt(self, video_state, prompt_mode, frame_idx, obj_id,
+                         positive_points=None, negative_points=None,
+                         positive_boxes=None, negative_boxes=None):
+
+        try:
+            from ComfyUI_SAM3.video_state import VideoPrompt
+        except ImportError:
+            try:
+                import sys, os
+                # Walk custom_nodes to find ComfyUI-SAM3
+                for path in sys.path:
+                    candidate = os.path.join(path, "ComfyUI-SAM3", "video_state.py")
+                    if os.path.exists(candidate):
+                        import importlib.util
+                        spec = importlib.util.spec_from_file_location("video_state", candidate)
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        VideoPrompt = mod.VideoPrompt
+                        break
+                else:
+                    raise ImportError("ComfyUI-SAM3 not found in sys.path")
+            except Exception as e:
+                raise ImportError(
+                    f"[SAMheraAddFramePrompt] Could not import VideoPrompt from ComfyUI-SAM3: {e}\n"
+                    "Make sure ComfyUI-SAM3 is installed in custom_nodes."
+                )
+
+        print(f"[SAMheraAddFramePrompt] mode={prompt_mode} frame={frame_idx} obj_id={obj_id}")
+        print(f"[SAMheraAddFramePrompt] Prompts before: {len(video_state.prompts)}")
+
+        if prompt_mode == "point":
+            all_points, all_labels = [], []
+
+            if positive_points and positive_points.get("points"):
+                for pt in positive_points["points"]:
+                    all_points.append([float(pt[0]), float(pt[1])])
+                    all_labels.append(1)
+
+            if negative_points and negative_points.get("points"):
+                for pt in negative_points["points"]:
+                    all_points.append([float(pt[0]), float(pt[1])])
+                    all_labels.append(0)
+
+            if not all_points:
+                print("[SAMheraAddFramePrompt] Warning: no points provided, returning state unchanged")
+                return (video_state,)
+
+            prompt = VideoPrompt.create_point(frame_idx, obj_id, all_points, all_labels)
+            video_state = video_state.with_prompt(prompt)
+            pos_n = all_labels.count(1)
+            neg_n = all_labels.count(0)
+            print(f"[SAMheraAddFramePrompt] Added {len(all_points)} points ({pos_n} pos, {neg_n} neg) at frame {frame_idx}")
+
+        elif prompt_mode == "box":
+            added = False
+
+            if positive_boxes and positive_boxes.get("boxes"):
+                cx, cy, w, h = positive_boxes["boxes"][0]
+                x1, y1, x2, y2 = cx - w/2, cy - h/2, cx + w/2, cy + h/2
+                prompt = VideoPrompt.create_box(frame_idx, obj_id, [x1, y1, x2, y2], is_positive=True)
+                video_state = video_state.with_prompt(prompt)
+                print(f"[SAMheraAddFramePrompt] Added positive box [{x1:.3f},{y1:.3f},{x2:.3f},{y2:.3f}] at frame {frame_idx}")
+                added = True
+
+            if negative_boxes and negative_boxes.get("boxes"):
+                cx, cy, w, h = negative_boxes["boxes"][0]
+                x1, y1, x2, y2 = cx - w/2, cy - h/2, cx + w/2, cy + h/2
+                prompt = VideoPrompt.create_box(frame_idx, obj_id, [x1, y1, x2, y2], is_positive=False)
+                video_state = video_state.with_prompt(prompt)
+                print(f"[SAMheraAddFramePrompt] Added negative box at frame {frame_idx}")
+                added = True
+
+            if not added:
+                print("[SAMheraAddFramePrompt] Warning: no boxes provided, returning state unchanged")
+                return (video_state,)
+
+        print(f"[SAMheraAddFramePrompt] Prompts after: {len(video_state.prompts)}")
+        return (video_state,)
+
+
+NODE_CLASS_MAPPINGS["SAMheraAddFramePrompt"] = SAMheraAddFramePrompt
+NODE_DISPLAY_NAME_MAPPINGS["SAMheraAddFramePrompt"] = "Add Frame Prompt [SAMhera]"
