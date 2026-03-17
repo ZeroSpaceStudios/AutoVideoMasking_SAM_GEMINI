@@ -833,28 +833,14 @@ class SAMheraAddFramePrompt:
                          positive_points=None, negative_points=None,
                          positive_boxes=None, negative_boxes=None):
 
-        try:
-            from ComfyUI_SAM3.video_state import VideoPrompt
-        except ImportError:
-            try:
-                import sys, os
-                # Walk custom_nodes to find ComfyUI-SAM3
-                for path in sys.path:
-                    candidate = os.path.join(path, "ComfyUI-SAM3", "video_state.py")
-                    if os.path.exists(candidate):
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location("video_state", candidate)
-                        mod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        VideoPrompt = mod.VideoPrompt
-                        break
-                else:
-                    raise ImportError("ComfyUI-SAM3 not found in sys.path")
-            except Exception as e:
-                raise ImportError(
-                    f"[SAMheraAddFramePrompt] Could not import VideoPrompt from ComfyUI-SAM3: {e}\n"
-                    "Make sure ComfyUI-SAM3 is installed in custom_nodes."
-                )
+        import importlib.util, os as _os
+        _base = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), "..", "..", "ComfyUI-SAM3", "nodes", "video_state.py"))
+        if not _os.path.exists(_base):
+            raise ImportError(f"[SAMheraAddFramePrompt] video_state.py not found at {_base}")
+        _spec = importlib.util.spec_from_file_location("sam3_video_state", _base)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        VideoPrompt = _mod.VideoPrompt
 
         print(f"[SAMheraAddFramePrompt] mode={prompt_mode} frame={frame_idx} obj_id={obj_id}")
         print(f"[SAMheraAddFramePrompt] Prompts before: {len(video_state.prompts)}")
