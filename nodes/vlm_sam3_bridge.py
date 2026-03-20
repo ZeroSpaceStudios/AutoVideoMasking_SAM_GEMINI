@@ -789,6 +789,349 @@ class VLMFacePartsBBox:
 
 
 # =============================================================================
+# VLMFacePrecisePoints
+# =============================================================================
+
+# Per-target: what foreground covers, which zones to sample, what background is
+_FACE_TARGET_CONFIG = {
+    "face_skin": {
+        "fg_desc":   "face skin only — forehead, both cheeks, nose bridge, nose tip, lips, chin. Strictly exclude hair, eyebrows, eyelashes, glasses, and neck.",
+        "fg_zones":  "forehead center, left cheek mid, right cheek mid, nose tip, nose bridge, chin center, left cheek near jaw, right cheek near jaw",
+        "bg_desc":   "hair (above hairline), neck and chin underside, background behind head, shoulders",
+        "bg_zones":  "hair above left temple, hair above right temple, neck below chin center, background left of face, background right of face",
+    },
+    "face_with_hair": {
+        "fg_desc":   "full face AND complete head of hair — from hair crown to chin",
+        "fg_zones":  "forehead center, left cheek, right cheek, crown of hair, left side of hair, right side of hair, chin center",
+        "bg_desc":   "neck/collar area, background behind head, shoulders, body",
+        "bg_zones":  "neck below chin, background top-left, background top-right, left shoulder, right shoulder",
+    },
+    "face_with_neck": {
+        "fg_desc":   "face skin AND neck — forehead down to collar. Exclude hair.",
+        "fg_zones":  "forehead center, left cheek, right cheek, nose tip, chin center, left neck side, right neck side, lower neck center",
+        "bg_desc":   "hair above forehead, background, clothing collar, shoulders",
+        "bg_zones":  "hair top-left, hair top-right, background left, collar left, collar right",
+    },
+    "full_head": {
+        "fg_desc":   "entire head — face, hair, ears, top of neck. Exclude background and clothing.",
+        "fg_zones":  "forehead, left cheek, right cheek, crown of hair, left ear area, right ear area, upper neck",
+        "bg_desc":   "background behind head, clothing, body, anything below collar",
+        "bg_zones":  "background top-center, background left, background right, clothing collar, lower body",
+    },
+}
+
+class VLMFacePrecisePoints:
+    """
+    Generates SAM3-ready bbox + points specifically for precise face masking.
+    Uses face-anatomy-aware prompting to spread foreground points across all
+    major face zones and place background points at exact face boundaries.
+
+    Workflow:
+        VLMtoBBox -> VLMFacePartsBBox -> VLMFacePrecisePoints -> SAM3
+        or
+        VLMtoBBox -> VLMFacePrecisePoints (no face_bbox, crops to person)
+    """
+
+    FACE_TARGETS = ["face_skin", "face_with_hair", "face_with_neck", "full_head"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image":          ("IMAGE",),
+                "api":            ("SAMHERA_API",),
+                "face_target":    (cls.FACE_TARGETS, {"default": "face_skin"}),
+                "num_fg_points":  ("INT", {"default": 8, "min": 4, "max": 16}),
+                "num_bg_points":  ("INT", {"default": 4, "min": 0, "max": 8}),
+            },
+            "optional": {
+                "face_bbox":      ("SAM3_BOXES_PROMPT",),  # from VLMFacePartsBBox face output
+                "include_beard":  ("BOOLEAN", {"default": True}),
+                "include_ears":   ("BOOLEAN", {"default": False}),
+                "crop_padding":   ("INT", {"default": 20, "min": 0, "max": 80}),
+            }
+        }
+
+    RETURN_TYPES  = ("SAM3_BOX_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_POINTS_PROMPT", "SAM3_POINTS_PROMPT", "STRING")
+    RETURN_NAMES  = ("box_prompt", "boxes_prompt", "positive_points", "negative_points", "raw_vlm_response")
+    FUNCTION      = "run"
+    CATEGORY      = "SAMhera/Face"
+
+    def run(self, image, api, face_target, num_fg_points, num_bg_points,
+            face_bbox=None, include_beard=True, include_ears=False, crop_padding=20):
+        pil_full = _tensor_to_pil(image)
+        W, H = pil_full.size
+
+        # Crop to face bbox if provided
+        crop_x1, crop_y1 = 0, 0
+        pil_img = pil_full
+        if face_bbox and face_bbox.get("boxes"):
+            cx_n, cy_n, bw_n, bh_n = face_bbox["boxes"][0]
+            cx1 = max(0, int((cx_n - bw_n/2) * W) - crop_padding)
+            cy1 = max(0, int((cy_n - bh_n/2) * H) - crop_padding)
+            cx2 = min(W, int((cx_n + bw_n/2) * W) + crop_padding)
+            cy2 = min(H, int((cy_n + bh_n/2) * H) + crop_padding)
+            pil_img = pil_full.crop((cx1, cy1, cx2, cy2))
+            crop_x1, crop_y1 = cx1, cy1
+
+        cW, cH = pil_img.size
+        cfg = _FACE_TARGET_CONFIG[face_target]
+
+        # Build modifier notes
+        modifiers = []
+        if face_target == "face_skin":
+            if include_beard:
+                modifiers.append("If beard/stubble is present, include it as foreground.")
+            else:
+                modifiers.append("Exclude any beard or stubble — treat as background.")
+            if include_ears:
+                modifiers.append("Include ears as foreground.")
+            else:
+                modifiers.append("Exclude ears — treat as background.")
+        modifier_block = ("\n" + "\n".join(modifiers)) if modifiers else ""
+
+        prompt = (
+            f"Image: {cW}x{cH} px (cropped to face region).\n\n"
+            f"TARGET: {cfg['fg_desc']}{modifier_block}\n\n"
+            f"Place {num_fg_points} FOREGROUND points spread across these zones:\n"
+            f"  {cfg['fg_zones']}\n"
+            "  → Points must be deep inside the region, never on edges or boundaries.\n\n"
+            f"Place {num_bg_points} BACKGROUND points on: {cfg['bg_desc']}\n"
+            f"  Preferred zones: {cfg['bg_zones']}\n"
+            "  → Points should be close to but outside the target boundary.\n\n"
+            "Also return a tight bounding box around the target region.\n\n"
+            "Return ONLY JSON (pixel coordinates in this cropped image):\n"
+            '{"bbox": [x1, y1, x2, y2], "foreground": [[x, y], ...], "background": [[x, y], ...]}\n'
+            "Rules: x1<x2 y1<y2, spread points — do NOT cluster them."
+        )
+
+        raw = _call_gemini(pil_img, prompt, api)
+        print(f"[VLMFacePrecisePoints] target={face_target} crop={cW}x{cH} | raw: {raw}")
+
+        # Parse response
+        try:
+            data = _parse_json(raw)
+            x1, y1, x2, y2 = data["bbox"]
+            fg_raw = data.get("foreground", [[cW//2, cH//2]])
+            bg_raw = data.get("background", [])
+        except Exception as e:
+            print(f"[VLMFacePrecisePoints] Parse error: {e} — fallback to full crop")
+            x1, y1, x2, y2 = 0, 0, cW, cH
+            fg_raw = [[cW//2, cH//2]]
+            bg_raw = []
+
+        fg_raw = fg_raw[:num_fg_points]
+        bg_raw = bg_raw[:num_bg_points]
+
+        # Normalize bbox back to full image coords
+        x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, cW, cH)
+        # Offset crop origin
+        ax1 = (x1n * cW + crop_x1) / W
+        ay1 = (y1n * cH + crop_y1) / H
+        ax2 = (x2n * cW + crop_x1) / W
+        ay2 = (y2n * cH + crop_y1) / H
+        cx = (ax1 + ax2) / 2;  cy = (ay1 + ay2) / 2
+        bw = ax2 - ax1;        bh = ay2 - ay1
+
+        box_prompt   = {"box":   [cx, cy, bw, bh], "label": True}
+        boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [True]}
+
+        # Normalize points back to full image
+        def _norm_pts(pts_raw, label_val):
+            pts, lbls = [], []
+            for pt in pts_raw:
+                px, py = pt[0], pt[1]
+                # Handle if Gemini returns normalized [0-1] instead of pixels
+                abs_x = (px * cW) if px <= 1.5 else px
+                abs_y = (py * cH) if py <= 1.5 else py
+                nx = max(0.0, min(1.0, (abs_x + crop_x1) / W))
+                ny = max(0.0, min(1.0, (abs_y + crop_y1) / H))
+                pts.append([nx, ny])
+                lbls.append(label_val)
+            return {"points": pts, "labels": lbls}
+
+        positive_points = _norm_pts(fg_raw, 1)
+        negative_points = _norm_pts(bg_raw, 0)
+
+        print(f"[VLMFacePrecisePoints] box:[{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}] "
+              f"fg:{len(positive_points['points'])} bg:{len(negative_points['points'])}")
+        return (box_prompt, boxes_prompt, positive_points, negative_points, raw)
+
+
+# =============================================================================
+# VLMFaceRegion
+# =============================================================================
+
+class VLMFaceRegion:
+    """
+    One-stop node for precise face region masking.
+
+    Stage 1 (full image) — VLM detects a tight bbox for your free-text region.
+    Stage 2 (crop)       — VLM places anatomy-aware points on the crop at higher
+                           effective resolution.
+
+    Solves common face masking problems:
+      • Open mouth / teeth cutoff → prompt explicitly extends bbox to include
+        mouth interior, teeth, tongue when visible.
+      • Neck truncation           → prompt extends bbox to collar/shoulder junction.
+      • Low point density on face → SAM3 works on the crop, not the full image.
+
+    Typical workflow:
+        Image → VLMFaceRegion → [cropped_image + crop_meta + points] → SAM3
+                                       └─ SAMheraPasteBackMask → full-size mask
+
+    region examples:
+        "face including open mouth and teeth"
+        "face and full neck down to collarbone"
+        "neck and upper clothing, exclude face"
+        "face skin only, exclude hair and neck"
+    """
+
+    _FACE_RULES = (
+        "CRITICAL boundary rules:\n"
+        "  • FACE: bbox must include full chin, jaw underside, and any open mouth /\n"
+        "    teeth / tongue interior. Never cut at the lips.\n"
+        "  • NECK: bbox must extend fully to where neck meets collar or shoulders.\n"
+        "    Never cut at the chin.\n"
+        "  • HAIR: bbox extends to hair tips, not just the scalp.\n"
+        "  • Foreground points must be deep inside the region — never on its border.\n"
+        "  • Background points must be just outside the region boundary.\n"
+        "  • Spread points across the WHOLE region, do NOT cluster them.\n"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image":         ("IMAGE",),
+                "api":           ("SAMHERA_API",),
+                "region":        ("STRING", {
+                    "default":   "face including open mouth and teeth",
+                    "multiline": True,
+                }),
+                "num_fg_points": ("INT", {"default": 8, "min": 4, "max": 16}),
+                "num_bg_points": ("INT", {"default": 4, "min": 0, "max": 8}),
+                "crop_padding":  ("INT", {"default": 24, "min": 0, "max": 80}),
+            },
+            "optional": {
+                "person_bbox":   ("SAM3_BOXES_PROMPT",),
+            }
+        }
+
+    RETURN_TYPES  = ("IMAGE", "CROP_META",
+                     "SAM3_BOX_PROMPT", "SAM3_BOXES_PROMPT",
+                     "SAM3_POINTS_PROMPT", "SAM3_POINTS_PROMPT", "STRING")
+    RETURN_NAMES  = ("cropped_image", "crop_meta",
+                     "box_prompt", "boxes_prompt",
+                     "positive_points", "negative_points", "raw_vlm_response")
+    FUNCTION      = "run"
+    CATEGORY      = "SAMhera/Face"
+
+    def run(self, image, api, region, num_fg_points, num_bg_points,
+            crop_padding=24, person_bbox=None):
+        import torch
+        pil_full = _tensor_to_pil(image)
+        W, H = pil_full.size
+
+        # Optionally restrict search to person bbox
+        search_img = pil_full
+        search_x1, search_y1 = 0, 0
+        if person_bbox and person_bbox.get("boxes"):
+            cx_n, cy_n, bw_n, bh_n = person_bbox["boxes"][0]
+            px1 = max(0, int((cx_n - bw_n/2) * W) - 10)
+            py1 = max(0, int((cy_n - bh_n/2) * H) - 10)
+            px2 = min(W, int((cx_n + bw_n/2) * W) + 10)
+            py2 = min(H, int((cy_n + bh_n/2) * H) + 10)
+            search_img = pil_full.crop((px1, py1, px2, py2))
+            search_x1, search_y1 = px1, py1
+
+        sW, sH = search_img.size
+
+        # ── Stage 1: detect region bbox ───────────────────────────────
+        prompt1 = (
+            f"Image: {sW}x{sH} px.\n"
+            f"TARGET: {region}\n\n"
+            + self._FACE_RULES +
+            "\nReturn ONLY JSON (pixel coords):\n"
+            '{"bbox": [x1, y1, x2, y2]}\n'
+            "Tight box. x1<x2 y1<y2."
+        )
+        raw1 = _call_gemini(search_img, prompt1, api)
+        print(f"[VLMFaceRegion] Stage1: {raw1}")
+
+        try:
+            bx1, by1, bx2, by2 = _parse_json(raw1)["bbox"]
+        except Exception as e:
+            print(f"[VLMFaceRegion] Stage1 parse error: {e}")
+            bx1, by1, bx2, by2 = 0, 0, sW, sH
+
+        # Map to full-image pixel space
+        if any(v > 2.0 for v in [bx1, by1, bx2, by2]):
+            bx1 += search_x1;  by1 += search_y1
+            bx2 += search_x1;  by2 += search_y1
+        else:
+            bx1 = bx1 * sW + search_x1;  by1 = by1 * sH + search_y1
+            bx2 = bx2 * sW + search_x1;  by2 = by2 * sH + search_y1
+
+        cx1 = max(0, int(bx1) - crop_padding)
+        cy1 = max(0, int(by1) - crop_padding)
+        cx2 = min(W, int(bx2) + crop_padding)
+        cy2 = min(H, int(by2) + crop_padding)
+        crop_meta = {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2, "orig_w": W, "orig_h": H}
+
+        cropped_tensor = image[:, cy1:cy2, cx1:cx2, :]
+        pil_crop = pil_full.crop((cx1, cy1, cx2, cy2))
+        cW, cH = pil_crop.size
+
+        # ── Stage 2: precise points on the crop ───────────────────────
+        prompt2 = (
+            f"Image: {cW}x{cH} px — cropped tightly to: {region}.\n"
+            f"TARGET: {region}\n\n"
+            + self._FACE_RULES +
+            f"\nPlace {num_fg_points} FOREGROUND points spread across the entire target.\n"
+            f"Place {num_bg_points} BACKGROUND points just outside the target boundary.\n\n"
+            "Return ONLY JSON (pixel coords in this cropped image):\n"
+            '{"foreground": [[x, y], ...], "background": [[x, y], ...]}'
+        )
+        raw2 = _call_gemini(pil_crop, prompt2, api)
+        print(f"[VLMFaceRegion] Stage2: {raw2}")
+
+        try:
+            d2 = _parse_json(raw2)
+            fg_raw = d2.get("foreground", [[cW//2, cH//2]])
+            bg_raw = d2.get("background", [])
+        except Exception as e:
+            print(f"[VLMFaceRegion] Stage2 parse error: {e}")
+            fg_raw = [[cW//2, cH//2]]; bg_raw = []
+
+        fg_raw = fg_raw[:num_fg_points]
+        bg_raw = bg_raw[:num_bg_points]
+
+        # box_prompt covers the whole crop (SAM3 works on cropped_image)
+        box_prompt   = {"box":   [0.5, 0.5, 1.0, 1.0], "label": True}
+        boxes_prompt = {"boxes": [[0.5, 0.5, 1.0, 1.0]], "labels": [True]}
+
+        def _to_crop_norm(pts_raw, label_val):
+            pts, lbls = [], []
+            for pt in pts_raw:
+                px, py = pt[0], pt[1]
+                nx = max(0.0, min(1.0, (px / cW) if px > 1.5 else px))
+                ny = max(0.0, min(1.0, (py / cH) if py > 1.5 else py))
+                pts.append([nx, ny]); lbls.append(label_val)
+            return {"points": pts, "labels": lbls}
+
+        positive_points = _to_crop_norm(fg_raw, 1)
+        negative_points = _to_crop_norm(bg_raw, 0)
+
+        print(f"[VLMFaceRegion] crop=[{cx1},{cy1},{cx2},{cy2}] "
+              f"fg:{len(positive_points['points'])} bg:{len(negative_points['points'])}")
+
+        raw_combined = f"=== Stage1 (bbox) ===\n{raw1}\n=== Stage2 (points) ===\n{raw2}"
+        return (cropped_tensor, crop_meta, box_prompt, boxes_prompt,
+                positive_points, negative_points, raw_combined)
+
+
+# =============================================================================
 # Registration
 # =============================================================================
 
@@ -803,6 +1146,8 @@ NODE_CLASS_MAPPINGS = {
     "VLMDebugPreview":        VLMDebugPreview,
     "SAMheraAddFramePrompt":  SAMheraAddFramePrompt,
     "VLMFacePartsBBox":       VLMFacePartsBBox,
+    "VLMFacePrecisePoints":   VLMFacePrecisePoints,
+    "VLMFaceRegion":          VLMFaceRegion,
     "SAMheraCropByBox":       SAMheraCropByBox,
     "SAMheraPasteBackMask":   SAMheraPasteBackMask,
 }
@@ -818,6 +1163,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VLMDebugPreview":        "VLM Debug Preview (SAMhera)",
     "SAMheraAddFramePrompt":  "Add Frame Prompt [SAMhera]",
     "VLMFacePartsBBox":       "VLM -> Face Parts BBox [SAMhera]",
+    "VLMFacePrecisePoints":   "VLM -> Face Precise Points [SAMhera]",
+    "VLMFaceRegion":          "VLM Face Region [SAMhera]",
     "SAMheraCropByBox":       "Crop by Box [SAMhera]",
     "SAMheraPasteBackMask":   "Paste Back Mask [SAMhera]",
 }
