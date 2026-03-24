@@ -395,6 +395,10 @@ class VLMtoBBoxAndPoints:
         pos_raw = pos_raw[:num_pos_points]
         neg_raw = neg_raw[:num_neg_points]
 
+        print(f"[VLMtoBBoxAndPoints] Image size received: {W}x{H}, "
+              f"bbox pixel: {x1},{y1},{x2},{y2}, "
+              f"normalized: {x1/W:.3f},{y1/H:.3f},{x2/W:.3f},{y2/H:.3f}")
+
         x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
         cx = (x1n+x2n)/2; cy = (y1n+y2n)/2
         bw = x2n-x1n;     bh = y2n-y1n
