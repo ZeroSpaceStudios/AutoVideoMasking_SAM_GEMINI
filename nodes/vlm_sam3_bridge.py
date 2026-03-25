@@ -422,6 +422,113 @@ class VLMtoBBoxAndPoints:
 
 
 # =============================================================================
+# VLMPromptEditor — inspect and override the Gemini prompt inside the node
+# =============================================================================
+
+class VLMPromptEditor:
+    """
+    Drop-in replacement for VLMtoBBoxAndPoints.
+    - Auto-builds the same prompt from parameters
+    - Outputs prompt_used (STRING) so you can wire it to a text display node
+    - override_prompt text area lets you edit the prompt directly in the node
+      (leave empty to use auto-generated prompt)
+    - Identical outputs to VLMtoBBoxAndPoints — fully compatible
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image":              ("IMAGE",),
+                "api":                ("SAMHERA_API",),
+                "target_description": ("STRING", {"default": "the main subject", "multiline": False}),
+                "num_pos_points":     ("INT", {"default": 6, "min": 1, "max": 12}),
+                "num_neg_points":     ("INT", {"default": 3, "min": 0, "max": 6}),
+                "is_positive":        ("BOOLEAN", {"default": True}),
+                "override_prompt":    ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "Leave empty to use the auto-generated prompt. "
+                               "Edit here to override what gets sent to Gemini.",
+                }),
+            }
+        }
+
+    RETURN_TYPES  = ("SAM3_BOX_PROMPT", "SAM3_BOXES_PROMPT",
+                     "SAM3_POINTS_PROMPT", "SAM3_POINTS_PROMPT",
+                     "STRING", "STRING")
+    RETURN_NAMES  = ("box_prompt", "boxes_prompt",
+                     "positive_points", "negative_points",
+                     "prompt_used", "raw_vlm_response")
+    FUNCTION      = "run"
+    CATEGORY      = "SAMhera"
+
+    def run(self, image, api, target_description, num_pos_points,
+            num_neg_points, is_positive, override_prompt=""):
+        pil_img = _tensor_to_pil(image)
+        W, H = pil_img.size
+
+        auto_prompt = (
+            f"Segment: {target_description}\nImage: {W}x{H} pixels.\n\n"
+            "1. Tight bounding box around the target.\n"
+            f"2. {num_pos_points} positive point(s) ON the {target_description}"
+            " — spread across, deep inside, never on edges.\n"
+            f"3. {num_neg_points} negative point(s) on anything NOT {target_description}"
+            " — near boundary.\n\n"
+            "Return ONLY JSON:\n"
+            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}'
+        )
+
+        final_prompt = override_prompt.strip() if override_prompt.strip() else auto_prompt
+        mode = "OVERRIDE" if override_prompt.strip() else "AUTO"
+
+        print(f"[VLMPromptEditor] Image: {W}x{H} | mode: {mode}")
+        print(f"[VLMPromptEditor] Prompt sent:\n{final_prompt}")
+
+        raw = _call_gemini(pil_img, final_prompt, api)
+        print(f"[VLMPromptEditor] Raw response: {raw}")
+
+        try:
+            data   = _parse_json(raw)
+            x1, y1, x2, y2 = data["bbox"]
+            pos_raw = data.get("positive", [[W//2, H//2]])
+            neg_raw = data.get("negative", [])
+        except Exception as e:
+            print(f"[VLMPromptEditor] Parse error: {e}")
+            x1, y1, x2, y2 = 0, 0, W, H
+            pos_raw = [[W//2, H//2]]; neg_raw = []
+
+        print(f"[VLMPromptEditor] Image size received: {W}x{H}, "
+              f"bbox pixel: {x1},{y1},{x2},{y2}, "
+              f"normalized: {x1/W:.3f},{y1/H:.3f},{x2/W:.3f},{y2/H:.3f}")
+
+        pos_raw = pos_raw[:num_pos_points]
+        neg_raw = neg_raw[:num_neg_points]
+
+        x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
+        cx = (x1n+x2n)/2; cy = (y1n+y2n)/2
+        bw = x2n-x1n;     bh = y2n-y1n
+
+        box_prompt   = {"box":   [cx, cy, bw, bh], "label": is_positive}
+        boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [is_positive]}
+
+        def to_norm(pts, label_val):
+            result, lbls = [], []
+            for pt in pts:
+                nx = max(0.0, min(1.0, pt[0]/W if pt[0] > 1.5 else pt[0]))
+                ny = max(0.0, min(1.0, pt[1]/H if pt[1] > 1.5 else pt[1]))
+                result.append([nx, ny]); lbls.append(label_val)
+            return {"points": result, "labels": lbls}
+
+        positive_points = to_norm(pos_raw, 1)
+        negative_points = to_norm(neg_raw, 0)
+
+        print(f"[VLMPromptEditor] box:[{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}] "
+              f"pos:{len(positive_points['points'])} neg:{len(negative_points['points'])}")
+        return (box_prompt, boxes_prompt, positive_points, negative_points, final_prompt, raw)
+
+
+# =============================================================================
 # VLMBBoxPreview
 # =============================================================================
 
@@ -1574,6 +1681,7 @@ NODE_CLASS_MAPPINGS = {
     "SAMheraLayerPropagate":  SAMheraLayerPropagate,
     "SAMheraReferenceMatch":  SAMheraReferenceMatch,
     "SAMheraLayerSelector":   SAMheraLayerSelector,
+    "VLMPromptEditor":        VLMPromptEditor,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1595,4 +1703,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAMheraLayerPropagate":  "Layer Propagate [SAMhera]",
     "SAMheraReferenceMatch":  "Reference Match [SAMhera]",
     "SAMheraLayerSelector":   "Layer Selector [SAMhera]",
+    "VLMPromptEditor":        "VLM Prompt Editor [SAMhera]",
 }
