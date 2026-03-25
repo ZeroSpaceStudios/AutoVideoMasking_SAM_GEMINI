@@ -58,8 +58,10 @@ def _parse_json(text: str) -> dict:
     return json.loads(text)
 
 def _maybe_normalize_corners(x1, y1, x2, y2, W, H):
+    # Gemini returns 0-1000 normalized scale, not pixel coords.
+    # If any value > 2.0 assume 0-1000 scale and divide by 1000.
     if any(v > 2.0 for v in [x1, y1, x2, y2]):
-        return x1/W, y1/H, x2/W, y2/H
+        return x1/1000, y1/1000, x2/1000, y2/1000
     return x1, y1, x2, y2
 
 def _call_gemini(pil_img, prompt, api):
@@ -254,8 +256,9 @@ class VLMtoPoints:
             pts, lbls = [], []
             for pt in pts_raw:
                 x, y = pt[0], pt[1]
-                abs_x = (x * crop_w + crop_x1) if x <= 1.5 else (x + crop_x1)
-                abs_y = (y * crop_h + crop_y1) if y <= 1.5 else (y + crop_y1)
+                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
+                abs_x = (x / 1000 * crop_w + crop_x1) if x > 1.5 else (x * crop_w + crop_x1)
+                abs_y = (y / 1000 * crop_h + crop_y1) if y > 1.5 else (y * crop_h + crop_y1)
                 pts.append([max(0.0, min(1.0, abs_x / W)), max(0.0, min(1.0, abs_y / H))])
                 lbls.append(label_val)
             return {"points": pts, "labels": lbls}
@@ -409,8 +412,9 @@ class VLMtoBBoxAndPoints:
         def to_norm(pts, label_val):
             result, lbls = [], []
             for pt in pts:
-                nx = max(0.0, min(1.0, pt[0]/W if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1]/H if pt[1] > 1.5 else pt[1]))
+                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
+                nx = max(0.0, min(1.0, pt[0]/1000 if pt[0] > 1.5 else pt[0]))
+                ny = max(0.0, min(1.0, pt[1]/1000 if pt[1] > 1.5 else pt[1]))
                 result.append([nx, ny]); lbls.append(label_val)
             return {"points": result, "labels": lbls}
 
@@ -515,8 +519,9 @@ class VLMPromptEditor:
         def to_norm(pts, label_val):
             result, lbls = [], []
             for pt in pts:
-                nx = max(0.0, min(1.0, pt[0]/W if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1]/H if pt[1] > 1.5 else pt[1]))
+                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
+                nx = max(0.0, min(1.0, pt[0]/1000 if pt[0] > 1.5 else pt[0]))
+                ny = max(0.0, min(1.0, pt[1]/1000 if pt[1] > 1.5 else pt[1]))
                 result.append([nx, ny]); lbls.append(label_val)
             return {"points": result, "labels": lbls}
 
@@ -1085,8 +1090,9 @@ class VLMFacePrecisePoints:
             for pt in pts_raw:
                 px, py = pt[0], pt[1]
                 # Handle if Gemini returns normalized [0-1] instead of pixels
-                abs_x = (px * cW) if px <= 1.5 else px
-                abs_y = (py * cH) if py <= 1.5 else py
+                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
+                abs_x = (px / 1000 * cW) if px > 1.5 else (px * cW)
+                abs_y = (py / 1000 * cH) if py > 1.5 else (py * cH)
                 nx = max(0.0, min(1.0, (abs_x + crop_x1) / W))
                 ny = max(0.0, min(1.0, (abs_y + crop_y1) / H))
                 pts.append([nx, ny])
