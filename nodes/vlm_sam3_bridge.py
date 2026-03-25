@@ -1286,14 +1286,14 @@ class VLMFaceRegion:
 
 LAYER_PRESETS = {
     "portrait": [
-        "face skin (forehead, cheeks, nose, chin, excluding hair and neck)",
-        "hair (scalp hair, eyebrows, eyelashes)",
-        "eyes (irises and whites)",
-        "lips and mouth area",
-        "neck and upper chest skin",
-        "clothing and garments",
-        "accessories (jewelry, glasses, earrings, hat)",
-        "background (everything behind the person)",
+        "face (skin region: forehead, cheeks, nose, chin — exclude hair, neck, ears)",
+        "hair (scalp hair only — top and sides of head, eyebrows if thick)",
+        "eyes and eye area (both eye sockets including eyelids, lashes, brows)",
+        "mouth and lips (upper lip, lower lip, chin dimple if present)",
+        "neck and upper chest",
+        "clothing and garments (shirt, jacket, top — anything worn on the body)",
+        "accessories (glasses, earrings, hat, necklace, jewelry)",
+        "background (everything not part of the person)",
     ],
     "full_body": [
         "face and head skin",
@@ -1367,16 +1367,20 @@ class SAMheraAutoLayer:
 
         layers_json = json.dumps(layer_descriptions, indent=2)
         prompt = (
-            f"Image: {W}x{H} pixels.\n"
-            "Detect and return a tight bounding box for each visible layer. "
-            "Skip layers not present. Max 8 results.\n\n"
+            f"Image dimensions: {W}x{H} pixels.\n\n"
+            "Task: locate each visible layer and return a TIGHT bounding box.\n"
+            "Coordinate scale: 0 to 1000 (0=top-left, 1000=bottom-right of image).\n\n"
             f"Layers to detect:\n{layers_json}\n\n"
-            "Return ONLY valid JSON (no markdown):\n"
+            "Rules:\n"
+            "- Use the FULL 0-1000 coordinate range; do not squash into a smaller range.\n"
+            "- Boxes must be TIGHT — hug the actual region boundary, no large empty margins.\n"
+            "- For small features (eyes, mouth, accessories): be precise — look carefully before placing the box.\n"
+            "- Skip any layer not visibly present. Omit entries with confidence < 0.3.\n"
+            "- x1 < x2, y1 < y2. Max 8 results, sorted by confidence descending.\n\n"
+            "Return ONLY valid JSON (no markdown, no explanation):\n"
             '{"layers": [\n'
-            '  {"label": "<short noun phrase>", "bbox": [x1, y1, x2, y2], "confidence": 0.9},\n'
-            "  ...\n]}\n"
-            "Rules: pixel coordinates, x1<x2, y1<y2, sorted by confidence descending. "
-            "Omit entries with confidence < 0.3."
+            '  {"label": "<short name>", "bbox": [x1, y1, x2, y2], "confidence": 0.0-1.0},\n'
+            "  ...\n]}"
         )
 
         raw = _call_gemini(pil_img, prompt, api)
