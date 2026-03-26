@@ -1318,7 +1318,7 @@ LAYER_PRESETS = {
 
 class SAMheraAutoLayer:
 
-    LAYER_PRESETS_LIST = ["portrait", "full_body", "product", "custom"]
+    LAYER_PRESETS_LIST = ["auto", "portrait", "full_body", "product", "custom"]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -1358,39 +1358,65 @@ class SAMheraAutoLayer:
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
 
-        if layer_preset == "custom":
-            layer_descriptions = [l.strip() for l in custom_prompt.strip().splitlines() if l.strip()]
-            if not layer_descriptions:
-                layer_descriptions = ["main subject", "background"]
+        # ── Call 1: Discovery ────────────────────────────────────────
+        # Let Gemini freely name what it actually sees, guided by preset category.
+        if layer_preset == "auto":
+            guidance_line = ""
+        elif layer_preset == "custom":
+            guidance = custom_prompt.strip() or "any distinct visual elements"
+            guidance_line = f"Focus on: {guidance}"
         else:
-            layer_descriptions = LAYER_PRESETS.get(layer_preset, LAYER_PRESETS["portrait"])
+            preset_guidance = {
+                "portrait":  "face skin, hair, eyes, mouth/lips, neck, clothing, accessories, background",
+                "full_body": "face/head, hair, upper clothing, lower clothing, shoes, hands/arms, accessories, background",
+                "product":   "main product, packaging, labels/text, shadow, props, background",
+            }
+            guidance_line = f"This is a {layer_preset} image. Focus on: {preset_guidance.get(layer_preset, 'distinct visual regions')}"
 
-        layers_json = json.dumps(layer_descriptions, indent=2)
-        prompt = (
-            f"Image dimensions: {W}x{H} pixels.\n\n"
-            "Task: locate each visible layer and return a TIGHT bounding box.\n"
-            "Coordinate scale: 0 to 1000 (0=top-left, 1000=bottom-right of image).\n\n"
-            f"Layers to detect:\n{layers_json}\n\n"
-            "Rules:\n"
-            "- Use the FULL 0-1000 coordinate range; do not squash into a smaller range.\n"
-            "- Boxes must be TIGHT — hug the actual region boundary, no large empty margins.\n"
-            "- For small features (eyes, mouth, accessories): be precise — look carefully before placing the box.\n"
-            "- Skip any layer not visibly present. Omit entries with confidence < 0.3.\n"
-            "- x1 < x2, y1 < y2. Max 8 results, sorted by confidence descending.\n\n"
-            "Return ONLY valid JSON (no markdown, no explanation):\n"
+        discovery_prompt = (
+            (f"{guidance_line}\n\n" if guidance_line else "")
+            + "Look at the image and list every distinct visual layer or region you can clearly see. "
+            "Give each a SHORT, SPECIFIC label (e.g. 'black turtleneck', 'curly brown hair', 'gold hoop earrings'). "
+            "Max 8 layers. Skip anything not clearly visible.\n\n"
+            "Return ONLY valid JSON (no markdown):\n"
+            '{"layers": ["label1", "label2", ...]}'
+        )
+
+        raw1 = _call_gemini(pil_img, discovery_prompt, api)
+        print(f"[SAMheraAutoLayer] Discovery: {raw1}")
+
+        try:
+            data1 = _parse_json(raw1)
+            discovered = [l.strip() for l in data1.get("layers", []) if isinstance(l, str) and l.strip()]
+            if not discovered:
+                raise ValueError("empty layers list")
+        except Exception as e:
+            print(f"[SAMheraAutoLayer] Discovery parse error: {e} — falling back to preset")
+            discovered = LAYER_PRESETS.get(layer_preset, LAYER_PRESETS["portrait"])
+
+        # ── Call 2: Localization ─────────────────────────────────────
+        # Return tight boxes for the labels Gemini itself identified.
+        labels_json = json.dumps(discovered, indent=2)
+        localize_prompt = (
+            f"Image: {W}x{H} pixels.\n\n"
+            f"Return a tight bounding box for each of these regions:\n{labels_json}\n\n"
+            "Pixel coordinates, x1<x2, y1<y2. Skip any region not visible. "
+            "Confidence 0.0-1.0. Omit entries below 0.3.\n\n"
+            "Return ONLY valid JSON (no markdown):\n"
             '{"layers": [\n'
-            '  {"label": "<short name>", "bbox": [x1, y1, x2, y2], "confidence": 0.0-1.0},\n'
+            '  {"label": "<exact label from list>", "bbox": [x1, y1, x2, y2], "confidence": 0.9},\n'
             "  ...\n]}"
         )
 
-        raw = _call_gemini(pil_img, prompt, api)
-        print(f"[SAMheraAutoLayer] Raw: {raw}")
+        raw2 = _call_gemini(pil_img, localize_prompt, api)
+        print(f"[SAMheraAutoLayer] Localization: {raw2}")
+        raw = f"=== Discovery ===\n{raw1}\n\n=== Localization ===\n{raw2}"
 
         try:
-            data = _parse_json(raw)
+            data = _parse_json(raw2)
             layers = data.get("layers", [])[:8]
         except Exception as e:
-            print(f"[SAMheraAutoLayer] Parse error: {e}"); layers = []
+            print(f"[SAMheraAutoLayer] Localization parse error: {e}"); layers = []
 
         empty = {"boxes": [], "labels": []}
 
@@ -1673,6 +1699,166 @@ class SAMheraLayerSelector:
 
 
 # =============================================================================
+# SAMheraAutoCrop — presence/discovery call + localization call + crop
+# =============================================================================
+
+class SAMheraAutoCrop:
+    """
+    Two-call Gemini workflow that produces cropped images without a preset:
+      Call 1 (Presence / Discovery): Gemini freely identifies what regions exist.
+      Call 2 (Localization): Gemini returns a tight bounding box for each region.
+    Each detected region is then cropped from the input image.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "api":   ("SAMHERA_API",),
+            },
+            "optional": {
+                "focus_hint": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": (
+                        "Optional hint to guide discovery "
+                        "(e.g. 'person and clothing'). "
+                        "Leave blank for fully automatic detection."
+                    ),
+                }),
+                "max_regions":      ("INT",     {"default": 8,    "min": 1,   "max": 8}),
+                "padding":          ("INT",     {"default": 16,   "min": 0,   "max": 128}),
+                "normalize_size":   ("BOOLEAN", {"default": True}),
+                "target_long_side": ("INT",     {"default": 1008, "min": 256, "max": 4096}),
+            },
+        }
+
+    RETURN_TYPES = (
+        "IMAGE", "IMAGE", "IMAGE", "IMAGE",
+        "IMAGE", "IMAGE", "IMAGE", "IMAGE",
+        "STRING", "STRING", "STRING", "STRING",
+        "STRING", "STRING", "STRING", "STRING",
+        "SAMHERA_LAYER_SET", "STRING", "STRING",
+    )
+    RETURN_NAMES = (
+        "crop_1", "crop_2", "crop_3", "crop_4",
+        "crop_5", "crop_6", "crop_7", "crop_8",
+        "label_1", "label_2", "label_3", "label_4",
+        "label_5", "label_6", "label_7", "label_8",
+        "layer_set", "label_list", "raw_response",
+    )
+    FUNCTION  = "run"
+    CATEGORY  = "SAMhera"
+
+    def run(self, image, api, focus_hint="", max_regions=8, padding=16,
+            normalize_size=True, target_long_side=1008):
+        import torch
+        import torch.nn.functional as F
+
+        pil_img = _tensor_to_pil(image)
+        W, H = pil_img.size
+
+        # ── Call 1: Presence / Discovery ─────────────────────────────────
+        hint_line = f"Focus on: {focus_hint.strip()}\n\n" if focus_hint.strip() else ""
+        discovery_prompt = (
+            f"{hint_line}"
+            "Look at this image and list every distinct visual region you can clearly see. "
+            "Give each a SHORT, SPECIFIC label (e.g. 'red jacket', 'person face', 'wooden table'). "
+            f"Return at most {max_regions} regions. Skip anything not clearly visible.\n\n"
+            "Return ONLY valid JSON (no markdown):\n"
+            '{"regions": ["label1", "label2", ...]}'
+        )
+
+        raw1 = _call_gemini(pil_img, discovery_prompt, api)
+        print(f"[SAMheraAutoCrop] Discovery: {raw1}")
+
+        try:
+            data1 = _parse_json(raw1)
+            discovered = [
+                r.strip() for r in data1.get("regions", [])
+                if isinstance(r, str) and r.strip()
+            ]
+            if not discovered:
+                raise ValueError("empty regions list")
+        except Exception as e:
+            print(f"[SAMheraAutoCrop] Discovery parse error: {e}")
+            empty = ""
+            return (*([image] * 8), *([empty] * 8), {}, "", raw1)
+
+        # ── Call 2: Localization ──────────────────────────────────────────
+        labels_json = json.dumps(discovered[:max_regions], indent=2)
+        localize_prompt = (
+            f"Image: {W}x{H} pixels.\n\n"
+            f"Return a tight bounding box for each of these regions:\n{labels_json}\n\n"
+            "Pixel coordinates, x1<x2, y1<y2. Skip any region not visible. "
+            "Confidence 0.0-1.0. Omit entries below 0.3.\n\n"
+            "Return ONLY valid JSON (no markdown):\n"
+            '{"regions": [\n'
+            '  {"label": "<exact label from list>", "bbox": [x1, y1, x2, y2], "confidence": 0.9},\n'
+            "  ...\n]}"
+        )
+
+        raw2 = _call_gemini(pil_img, localize_prompt, api)
+        print(f"[SAMheraAutoCrop] Localization: {raw2}")
+        raw = f"=== Discovery ===\n{raw1}\n\n=== Localization ===\n{raw2}"
+
+        try:
+            data2 = _parse_json(raw2)
+            regions = data2.get("regions", [])[:8]
+        except Exception as e:
+            print(f"[SAMheraAutoCrop] Localization parse error: {e}")
+            regions = []
+
+        # ── Crop each region ──────────────────────────────────────────────
+        _B, iH, iW, _C = image.shape
+
+        def _crop(entry):
+            x1p, y1p, x2p, y2p = entry["bbox"]
+            x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1p, y1p, x2p, y2p, W, H)
+            px1 = max(0, int(x1n * iW) - padding)
+            py1 = max(0, int(y1n * iH) - padding)
+            px2 = min(iW, int(x2n * iW) + padding)
+            py2 = min(iH, int(y2n * iH) + padding)
+            cropped = image[:, py1:py2, px1:px2, :]
+            ch, cw = py2 - py1, px2 - px1
+            if normalize_size and max(ch, cw) > 0:
+                scale = target_long_side / max(ch, cw)
+                if abs(scale - 1.0) > 0.01:
+                    oh, ow = round(ch * scale), round(cw * scale)
+                    cropped = F.interpolate(
+                        cropped.permute(0, 3, 1, 2).float(),
+                        size=(oh, ow), mode="bilinear", align_corners=False,
+                    ).permute(0, 2, 3, 1)
+            return cropped
+
+        crops, labels, layer_set = [], [], {}
+        for entry in regions:
+            try:
+                crop = _crop(entry)
+                lbl  = entry.get("label", f"region_{len(crops) + 1}")
+                crops.append(crop)
+                labels.append(lbl)
+                x1p, y1p, x2p, y2p = entry["bbox"]
+                x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1p, y1p, x2p, y2p, W, H)
+                cx = (x1n + x2n) / 2;  cy = (y1n + y2n) / 2
+                layer_set[lbl] = {
+                    "boxes":  [[cx, cy, x2n - x1n, y2n - y1n]],
+                    "labels": [True],
+                }
+            except Exception as e:
+                print(f"[SAMheraAutoCrop] Crop error for '{entry.get('label', '?')}': {e}")
+
+        while len(crops) < 8:
+            crops.append(image)
+            labels.append("")
+
+        label_list = "\n".join(f"{i+1}. {lb}" for i, lb in enumerate(labels) if lb)
+        print(f"[SAMheraAutoCrop] Cropped {len(regions)} regions: {[l for l in labels if l]}")
+        return (*crops[:8], *labels[:8], layer_set, label_list, raw)
+
+
+# =============================================================================
 # Registration
 # =============================================================================
 
@@ -1696,6 +1882,7 @@ NODE_CLASS_MAPPINGS = {
     "SAMheraReferenceMatch":  SAMheraReferenceMatch,
     "SAMheraLayerSelector":   SAMheraLayerSelector,
     "VLMPromptEditor":        VLMPromptEditor,
+    "SAMheraAutoCrop":        SAMheraAutoCrop,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1718,4 +1905,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAMheraReferenceMatch":  "Reference Match [SAMhera]",
     "SAMheraLayerSelector":   "Layer Selector [SAMhera]",
     "VLMPromptEditor":        "VLM Prompt Editor [SAMhera]",
+    "SAMheraAutoCrop":        "Auto Crop [SAMhera]",
 }
