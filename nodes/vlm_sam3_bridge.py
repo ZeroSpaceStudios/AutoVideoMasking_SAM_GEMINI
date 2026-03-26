@@ -1345,12 +1345,16 @@ class SAMheraAutoLayer:
                     "multiline": True,
                     "tooltip": "One layer description per line. Used when layer_preset='custom'.",
                 }),
+                "num_pos_points": ("INT", {"default": 4, "min": 1, "max": 12,
+                    "tooltip": "Positive points per layer (Call 3)."}),
+                "num_neg_points": ("INT", {"default": 2, "min": 0, "max": 6,
+                    "tooltip": "Negative points per layer (Call 3)."}),
             }
         }
 
     RETURN_TYPES = (
-        "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT",
-        "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT", "SAM3_BOXES_PROMPT",
+        "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT",
+        "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT", "SAM3_BOX_AND_POINT",
         "STRING", "STRING", "STRING", "STRING",
         "STRING", "STRING", "STRING", "STRING",
         "SAMHERA_LAYER_SET", "STRING", "STRING",
@@ -1365,7 +1369,8 @@ class SAMheraAutoLayer:
     FUNCTION = "run"
     CATEGORY = "SAMhera"
 
-    def run(self, image, api, layer_preset, custom_prompt=""):
+    def run(self, image, api, layer_preset, custom_prompt="",
+            num_pos_points=4, num_neg_points=2):
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
 
@@ -1429,26 +1434,73 @@ class SAMheraAutoLayer:
         except Exception as e:
             print(f"[SAMheraAutoLayer] Localization parse error: {e}"); layers = []
 
-        empty = {"boxes": [], "labels": []}
+        # ── Call 3: Points ────────────────────────────────────────────
+        # Ask for positive + negative points for every detected layer in one call.
+        points_data = {}
+        if layers:
+            layers_for_pts = [{"label": l.get("label"), "bbox": l.get("bbox")} for l in layers]
+            points_prompt = (
+                f"Image: {W}x{H} pixels.\n\n"
+                f"For each region below, return exactly {num_pos_points} positive points "
+                f"INSIDE the region (spread across, never on edges) and "
+                f"{num_neg_points} negative points OUTSIDE it (just beyond the boundary).\n\n"
+                f"Regions:\n{json.dumps(layers_for_pts, indent=2)}\n\n"
+                "Return ONLY valid JSON (no markdown):\n"
+                '{"layers": [\n'
+                '  {"label": "<exact label>", "positive": [[x,y],...], "negative": [[x,y],...]},\n'
+                "  ...\n]}"
+            )
+            raw3 = _call_gemini(pil_img, points_prompt, api)
+            print(f"[SAMheraAutoLayer] Points: {raw3}")
+            raw = f"=== Discovery ===\n{raw1}\n\n=== Localization ===\n{raw2}\n\n=== Points ===\n{raw3}"
+            try:
+                data3 = _parse_json(raw3)
+                for entry in data3.get("layers", []):
+                    lbl = entry.get("label", "")
+                    if lbl:
+                        points_data[lbl] = entry
+            except Exception as e:
+                print(f"[SAMheraAutoLayer] Points parse error: {e}")
+        else:
+            raw = f"=== Discovery ===\n{raw1}\n\n=== Localization ===\n{raw2}"
 
-        def _to_boxes(entry):
+        # ── Build outputs ─────────────────────────────────────────────
+        empty_boxes  = {"boxes": [], "labels": []}
+        empty_pts    = {"points": [], "labels": []}
+        empty_bundle = {"boxes": empty_boxes, "positive": empty_pts, "negative": empty_pts}
+
+        def _norm_pts(pts, label_val):
+            result, lbls = [], []
+            for pt in pts:
+                nx = max(0.0, min(1.0, pt[0] / 1000 if pt[0] > 1.5 else pt[0]))
+                ny = max(0.0, min(1.0, pt[1] / 1000 if pt[1] > 1.5 else pt[1]))
+                result.append([nx, ny]); lbls.append(label_val)
+            return {"points": result, "labels": lbls}
+
+        def _to_bundle(entry):
             x1, y1, x2, y2 = entry["bbox"]
             x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
             cx = (x1n + x2n) / 2; cy = (y1n + y2n) / 2
-            return {"boxes": [[cx, cy, x2n - x1n, y2n - y1n]], "labels": [True]}
+            boxes = {"boxes": [[cx, cy, x2n - x1n, y2n - y1n]], "labels": [True]}
+            lbl   = entry.get("label", "")
+            pts   = points_data.get(lbl, {})
+            pos   = _norm_pts(pts.get("positive", [])[:num_pos_points], 1)
+            neg   = _norm_pts(pts.get("negative", [])[:num_neg_points], 0)
+            return {"boxes": boxes, "positive": pos, "negative": neg}
 
-        boxes_list = [_to_boxes(l) for l in layers]
-        labels = [l.get("label", f"layer_{i+1}") for i, l in enumerate(layers)]
+        bundles = [_to_bundle(l) for l in layers]
+        labels  = [l.get("label", f"layer_{i+1}") for i, l in enumerate(layers)]
 
-        while len(boxes_list) < 8:
-            boxes_list.append(empty)
+        while len(bundles) < 8:
+            bundles.append(empty_bundle)
             labels.append("")
 
-        layer_set = {lbl: bp for lbl, bp in zip(labels, boxes_list) if lbl}
+        # layer_set keeps SAM3_BOXES_PROMPT for LayerPropagate / LayerSelector
+        layer_set  = {lbl: b["boxes"] for lbl, b in zip(labels, bundles) if lbl}
         label_list = "\n".join(f"{i+1}. {lb}" for i, lb in enumerate(labels) if lb)
 
         print(f"[SAMheraAutoLayer] Detected {len(layers)} layers: {[l for l in labels if l]}")
-        return (*boxes_list, *labels, layer_set, label_list, raw)
+        return (*bundles, *labels, layer_set, label_list, raw)
 
 
 # =============================================================================
