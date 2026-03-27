@@ -675,6 +675,8 @@ class SAMheraCropByBox:
                 "boxes_prompt": ("SAM3_BOX_AND_POINT",),
             },
             "optional": {
+                "label":          ("STRING",  {"default": "", "multiline": False,
+                                   "tooltip": "Label to display inside the node."}),
                 "padding":        ("INT",     {"default": 16,   "min": 0,   "max": 128}),
                 "box_index":      ("INT",     {"default": 0,    "min": 0,   "max": 4}),
                 "normalize_size": ("BOOLEAN", {"default": True}),
@@ -684,13 +686,15 @@ class SAMheraCropByBox:
 
     RETURN_TYPES  = ("IMAGE", "CROP_META")
     RETURN_NAMES  = ("cropped_image", "crop_meta")
+    OUTPUT_NODE   = True
     FUNCTION      = "run"
-    CATEGORY      = "SAMhera/Face"
+    CATEGORY      = "SAMhera"
 
-    def run(self, image, boxes_prompt, padding=16, box_index=0,
+    def run(self, image, boxes_prompt, label="", padding=16, box_index=0,
             normalize_size=True, target_long_side=1008):
         import torch
         import torch.nn.functional as F
+        import folder_paths, uuid, os
         B, H, W, C = image.shape
         boxes = boxes_prompt["boxes"].get("boxes", [])
 
@@ -698,7 +702,7 @@ class SAMheraCropByBox:
             meta = {"x1": 0, "y1": 0, "x2": W, "y2": H,
                     "orig_w": W, "orig_h": H, "scale": 1.0,
                     "resized_w": W, "resized_h": H}
-            return (image, meta)
+            return {"ui": {"images": [], "text": [label]}, "result": (image, meta)}
 
         cx, cy, bw, bh = boxes[box_index]
         x1 = max(0, int((cx - bw / 2) * W) - padding)
@@ -706,7 +710,7 @@ class SAMheraCropByBox:
         x2 = min(W, int((cx + bw / 2) * W) + padding)
         y2 = min(H, int((cy + bh / 2) * H) + padding)
 
-        cropped = image[:, y1:y2, x1:x2, :]   # [B, ch, cw, C]
+        cropped = image[:, y1:y2, x1:x2, :]
         crop_h, crop_w = y2 - y1, x2 - x1
 
         scale = 1.0
@@ -717,7 +721,6 @@ class SAMheraCropByBox:
             if scale != 1.0:
                 out_h = round(crop_h * scale)
                 out_w = round(crop_w * scale)
-                # interpolate expects [B, C, H, W]
                 cropped = F.interpolate(
                     cropped.permute(0, 3, 1, 2).float(),
                     size=(out_h, out_w),
@@ -731,7 +734,19 @@ class SAMheraCropByBox:
         }
         print(f"[SAMheraCropByBox] crop=[{x1},{y1},{x2},{y2}] {crop_w}x{crop_h}"
               f" → {out_w}x{out_h} (scale={scale:.3f})")
-        return (cropped, meta)
+
+        # Save preview to temp
+        fname = f"samhera_crop_{uuid.uuid4().hex[:8]}.png"
+        fpath = os.path.join(folder_paths.get_temp_directory(), fname)
+        _tensor_to_pil(cropped).save(fpath)
+
+        return {
+            "ui": {
+                "images": [{"filename": fname, "subfolder": "", "type": "temp"}],
+                "text":   [label] if label else [],
+            },
+            "result": (cropped, meta),
+        }
 
 
 # =============================================================================
