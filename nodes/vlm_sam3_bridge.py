@@ -737,7 +737,9 @@ class SAMheraCropByBox:
 
         # Save preview to temp with label bar
         fname = f"samhera_crop_{uuid.uuid4().hex[:8]}.png"
-        fpath = os.path.join(folder_paths.get_temp_directory(), fname)
+        temp_dir = folder_paths.get_temp_directory()
+        os.makedirs(temp_dir, exist_ok=True)
+        fpath = os.path.join(temp_dir, fname)
         preview = _tensor_to_pil(cropped).copy()
         if label:
             from PIL import ImageDraw, ImageFont
