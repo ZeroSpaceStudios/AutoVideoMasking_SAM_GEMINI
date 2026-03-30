@@ -1,0 +1,2091 @@
+{
+  "id": "fb4cec55-0e98-45fa-9bb3-27f9ab1186cb",
+  "revision": 0,
+  "last_node_id": 639,
+  "last_link_id": 1184,
+  "nodes": [
+    {
+      "id": 559,
+      "type": "PreviewAny",
+      "pos": [
+        -2460.578659543869,
+        1487.4640520351045
+      ],
+      "size": [
+        210,
+        247.39997314453103
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 999
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.18.1",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 563,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1320.57865954387,
+        917.4640520351021
+      ],
+      "size": [
+        273.205078125,
+        386.0000000000001
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1009
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1010
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1011
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 565,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1610.57865954387,
+        1387.4640520351045
+      ],
+      "size": [
+        273.205078125,
+        386
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1015
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1016
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1017
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 564,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1910.5786595438701,
+        1377.4640520351045
+      ],
+      "size": [
+        273.205078125,
+        386
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1012
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1013
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1014
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 579,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1316.974835755829,
+        1389.2476694366717
+      ],
+      "size": [
+        273.205078125,
+        386
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1052
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1183
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 566,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -2212.5736221502602,
+        928.4364605246767
+      ],
+      "size": [
+        273.205078125,
+        386.0000000000001
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1018
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1019
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1020
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 560,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -2200.5786595438685,
+        1377.4640520351045
+      ],
+      "size": [
+        273.205078125,
+        386
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1000
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1001
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1002
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 562,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1918.6833309133797,
+        945.7231046005334
+      ],
+      "size": [
+        273.205078125,
+        386.0000000000001
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1006
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1007
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1008
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 567,
+      "type": "SAMheraCropByBox",
+      "pos": [
+        -1618.1001008368428,
+        923.8562694074419
+      ],
+      "size": [
+        273.205078125,
+        386.0000000000001
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1021
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1022
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1023
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "SAMheraCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
+      "id": 570,
+      "type": "PreviewImage",
+      "pos": [
+        -968.297017068864,
+        1186.1092771522053
+      ],
+      "size": [
+        503.4805811103006,
+        308.49321296187304
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 1028
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.18.1",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 9,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        -3081.388105456333,
+        924.4478374522629
+      ],
+      "size": [
+        255.8291015625,
+        599.3843011876327
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            470,
+            959,
+            1024,
+            1026
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "1.7.7",
+        "Node name for S&R": "VHS_LoadVideo",
+        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": {
+        "video": "Chanel_Bag.mp4",
+        "force_rate": 0,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 60,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "Chanel_Bag.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "force_rate": 0,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 60,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      }
+    },
+    {
+      "id": 569,
+      "type": "VLMDebugPreview",
+      "pos": [
+        -966.3615968005397,
+        901.1080062946553
+      ],
+      "size": [
+        309.202734375,
+        186
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1026
+        },
+        {
+          "name": "box_and_point",
+          "shape": 7,
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1151
+        },
+        {
+          "name": "boxes_prompt",
+          "shape": 7,
+          "type": "SAM3_BOXES_PROMPT",
+          "link": null
+        },
+        {
+          "name": "positive_points",
+          "shape": 7,
+          "type": "SAM3_POINTS_PROMPT",
+          "link": null
+        },
+        {
+          "name": "negative_points",
+          "shape": 7,
+          "type": "SAM3_POINTS_PROMPT",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "debug_preview",
+          "type": "IMAGE",
+          "links": [
+            1028
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "a4f65fc9cea93537d0027daef570e9e40fd078c6",
+        "Node name for S&R": "VLMDebugPreview"
+      },
+      "widgets_values": [
+        3,
+        8,
+        true
+      ]
+    },
+    {
+      "id": 261,
+      "type": "VHS_SelectImages",
+      "pos": [
+        -2801.388105456333,
+        944.4478374522628
+      ],
+      "size": [
+        212.5712890625,
+        106
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 470
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1000,
+            1006,
+            1009,
+            1012,
+            1015,
+            1018,
+            1021,
+            1052
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "449839959f0153fb8a57211a9364c55163935ca9",
+        "Node name for S&R": "VHS_SelectImages",
+        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite"
+      },
+      "widgets_values": {
+        "indexes": "1",
+        "err_if_missing": true,
+        "err_if_empty": true
+      }
+    },
+    {
+      "id": 531,
+      "type": "LoadSAM3Model",
+      "pos": [
+        -2802.985198219794,
+        1264.6047191097505
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "sam3_model_config",
+          "type": "SAM3_MODEL_CONFIG",
+          "links": [
+            1154
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-sam3",
+        "ver": "29ceca1e0692ea84700ccce1aeadadf2eb644322",
+        "Node name for S&R": "LoadSAM3Model",
+        "aux_id": "PozzettiAndrea/ComfyUI-SAM3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 543,
+      "type": "SAM3Propagate",
+      "pos": [
+        -951.445421593067,
+        855.5620745895143
+      ],
+      "size": [
+        270,
+        170
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "sam3_model_config",
+          "type": "SAM3_MODEL_CONFIG",
+          "link": 1154
+        },
+        {
+          "name": "video_state",
+          "type": "SAM3_VIDEO_STATE",
+          "link": 968
+        },
+        {
+          "name": "sam3_model",
+          "type": "SAM3_MODEL",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "masks",
+          "type": "SAM3_VIDEO_MASKS",
+          "links": [
+            969
+          ]
+        },
+        {
+          "name": "scores",
+          "type": "SAM3_VIDEO_SCORES",
+          "links": [
+            971
+          ]
+        },
+        {
+          "name": "video_state",
+          "type": "SAM3_VIDEO_STATE",
+          "links": [
+            970
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-sam3",
+        "ver": "29ceca1e0692ea84700ccce1aeadadf2eb644322",
+        "Node name for S&R": "SAM3Propagate",
+        "aux_id": "PozzettiAndrea/ComfyUI-SAM3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0,
+        -1,
+        "forward"
+      ]
+    },
+    {
+      "id": 625,
+      "type": "Reroute",
+      "pos": [
+        -960.4793662004869,
+        778.1443692430558
+      ],
+      "size": [
+        191.2,
+        26
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "",
+          "type": "*",
+          "link": 1184
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SAM3_BOX_AND_POINT",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1150,
+            1151
+          ]
+        }
+      ],
+      "properties": {
+        "showOutputText": true,
+        "horizontal": false
+      }
+    },
+    {
+      "id": 545,
+      "type": "SaveVideo",
+      "pos": [
+        -379.14778877397913,
+        732.8801211343356
+      ],
+      "size": [
+        828.513021541057,
+        1065.4253844341683
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 972
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.70",
+        "Node name for S&R": "SaveVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Mask",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 538,
+      "type": "SAMheraUnpackBundle",
+      "pos": [
+        -624.9522547221809,
+        752.536559581133
+      ],
+      "size": [
+        215.89453125,
+        66
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "box_and_point",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1150
+        }
+      ],
+      "outputs": [
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOXES_PROMPT",
+          "links": []
+        },
+        {
+          "name": "positive_points",
+          "type": "SAM3_POINTS_PROMPT",
+          "links": [
+            960
+          ]
+        },
+        {
+          "name": "negative_points",
+          "type": "SAM3_POINTS_PROMPT",
+          "links": [
+            961
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "a196b2e5e2ba620b77a642ee2174527ecb60624b",
+        "Node name for S&R": "SAMheraUnpackBundle"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 537,
+      "type": "SAM3VideoSegmentation",
+      "pos": [
+        -621.6971696106067,
+        799.44047575983
+      ],
+      "size": [
+        270,
+        94
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video_frames",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 959
+        },
+        {
+          "name": "video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "name": "positive_points",
+          "shape": 7,
+          "type": "SAM3_POINTS_PROMPT",
+          "link": 960
+        },
+        {
+          "name": "negative_points",
+          "shape": 7,
+          "type": "SAM3_POINTS_PROMPT",
+          "link": 961
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_state",
+          "type": "SAM3_VIDEO_STATE",
+          "links": [
+            968
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-sam3",
+        "ver": "25e9d9a2d635a95915e88dbda5bb9bd06531eb40",
+        "Node name for S&R": "SAM3VideoSegmentation",
+        "aux_id": "PozzettiAndrea/ComfyUI-SAM3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "point",
+        0.3,
+        0.3
+      ]
+    },
+    {
+      "id": 542,
+      "type": "CreateVideo",
+      "pos": [
+        -620.3560028726922,
+        853.492514479492
+      ],
+      "size": [
+        270,
+        78
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 966
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            963
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.70",
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        30
+      ]
+    },
+    {
+      "id": 541,
+      "type": "CreateVideo",
+      "pos": [
+        -621.8057936537039,
+        897.4051727174135
+      ],
+      "size": [
+        270,
+        78
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 965
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            972
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.70",
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        30
+      ]
+    },
+    {
+      "id": 540,
+      "type": "MaskToImage",
+      "pos": [
+        -621.3212148522672,
+        944.7858622953918
+      ],
+      "size": [
+        193.2779296875,
+        26
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 964
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            965,
+            1105
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.70",
+        "Node name for S&R": "MaskToImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 544,
+      "type": "SAM3VideoOutput",
+      "pos": [
+        -616.6700511308945,
+        1022.841994110818
+      ],
+      "size": [
+        270,
+        122
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "masks",
+          "type": "SAM3_VIDEO_MASKS",
+          "link": 969
+        },
+        {
+          "name": "video_state",
+          "type": "SAM3_VIDEO_STATE",
+          "link": 970
+        },
+        {
+          "name": "scores",
+          "shape": 7,
+          "type": "SAM3_VIDEO_SCORES",
+          "link": 971
+        }
+      ],
+      "outputs": [
+        {
+          "name": "masks",
+          "type": "MASK",
+          "links": [
+            964
+          ]
+        },
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "visualization",
+          "type": "IMAGE",
+          "links": [
+            966,
+            1106
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-sam3",
+        "ver": "25e9d9a2d635a95915e88dbda5bb9bd06531eb40",
+        "Node name for S&R": "SAM3VideoOutput",
+        "aux_id": "PozzettiAndrea/ComfyUI-SAM3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0,
+        true
+      ]
+    },
+    {
+      "id": 539,
+      "type": "SaveVideo",
+      "pos": [
+        460.482410412013,
+        732.458065088507
+      ],
+      "size": [
+        808.7792007279932,
+        1042.382899053645
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 963
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.70",
+        "Node name for S&R": "SaveVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 568,
+      "type": "SAMheraAutoLayer",
+      "pos": [
+        -2480.578659543869,
+        917.4640520351021
+      ],
+      "size": [
+        233.6099609375,
+        520
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1024
+        },
+        {
+          "name": "api",
+          "type": "SAMHERA_API",
+          "link": 1025
+        }
+      ],
+      "outputs": [
+        {
+          "name": "layer_1",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1019,
+            1184
+          ]
+        },
+        {
+          "name": "layer_2",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1007
+          ]
+        },
+        {
+          "name": "layer_3",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1022
+          ]
+        },
+        {
+          "name": "layer_4",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1010
+          ]
+        },
+        {
+          "name": "layer_5",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1001
+          ]
+        },
+        {
+          "name": "layer_6",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1013
+          ]
+        },
+        {
+          "name": "layer_7",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1016
+          ]
+        },
+        {
+          "name": "layer_8",
+          "type": "SAM3_BOX_AND_POINT",
+          "links": [
+            1183
+          ]
+        },
+        {
+          "name": "label_1",
+          "type": "STRING",
+          "links": [
+            1020
+          ]
+        },
+        {
+          "name": "label_2",
+          "type": "STRING",
+          "links": [
+            1008
+          ]
+        },
+        {
+          "name": "label_3",
+          "type": "STRING",
+          "links": [
+            1023
+          ]
+        },
+        {
+          "name": "label_4",
+          "type": "STRING",
+          "links": [
+            1011
+          ]
+        },
+        {
+          "name": "label_5",
+          "type": "STRING",
+          "links": [
+            1002
+          ]
+        },
+        {
+          "name": "label_6",
+          "type": "STRING",
+          "links": [
+            1014
+          ]
+        },
+        {
+          "name": "label_7",
+          "type": "STRING",
+          "links": [
+            1017
+          ]
+        },
+        {
+          "name": "label_8",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "layer_set",
+          "type": "SAMHERA_LAYER_SET",
+          "links": null
+        },
+        {
+          "name": "label_list",
+          "type": "STRING",
+          "links": [
+            999
+          ]
+        },
+        {
+          "name": "raw_response",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "e0ebf664f57781afc1e5c7c393928c2732f59891",
+        "Node name for S&R": "SAMheraAutoLayer"
+      },
+      "widgets_values": [
+        "product",
+        "",
+        4,
+        2
+      ]
+    },
+    {
+      "id": 639,
+      "type": "Note",
+      "pos": [
+        -1324.6860108007106,
+        685.994958444893
+      ],
+      "size": [
+        309.1345069802121,
+        88
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "Select the layer_1-8 to this SAM3_BOX_AND_POINT"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 607,
+      "type": "ImageConcanate",
+      "pos": [
+        1336.5759833432774,
+        712.1576906839573
+      ],
+      "size": [
+        270,
+        102
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image1",
+          "type": "IMAGE",
+          "link": 1105
+        },
+        {
+          "name": "image2",
+          "type": "IMAGE",
+          "link": 1106
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1101
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "7519171dd6b6ccea43091c6b73e42443bba11f5b",
+        "Node name for S&R": "ImageConcanate",
+        "aux_id": "kijai/ComfyUI-KJNodes"
+      },
+      "widgets_values": [
+        "right",
+        true
+      ]
+    },
+    {
+      "id": 608,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1328.2360597934412,
+        758.982623218993
+      ],
+      "size": [
+        632.330865174067,
+        705.4985590088115
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 1101
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "449839959f0153fb8a57211a9364c55163935ca9",
+        "Node name for S&R": "VHS_VideoCombine",
+        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite"
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "AnimateDiff",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "AnimateDiff_00005.mp4",
+            "subfolder": "",
+            "type": "output",
+            "format": "video/h264-mp4",
+            "frame_rate": 24,
+            "workflow": "AnimateDiff_00005.png",
+            "fullpath": "/workspace/ComfyUI/output/AnimateDiff_00005.mp4"
+          }
+        }
+      }
+    },
+    {
+      "id": 256,
+      "type": "SAMheraAPIKey",
+      "pos": [
+        -2801.388105456333,
+        1134.4478374522632
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "api",
+          "type": "SAMHERA_API",
+          "links": [
+            1025
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "HeraKang000/SAMhera",
+        "ver": "e4b71410aace1419dbb330f17ba160d7bf29231e",
+        "Node name for S&R": "SAMheraAPIKey"
+      },
+      "widgets_values": [
+        "",
+        "gemini-3.1-pro-preview"
+      ]
+    }
+  ],
+  "links": [
+    [
+      470,
+      9,
+      0,
+      261,
+      0,
+      "IMAGE"
+    ],
+    [
+      959,
+      9,
+      0,
+      537,
+      0,
+      "IMAGE"
+    ],
+    [
+      960,
+      538,
+      1,
+      537,
+      2,
+      "SAM3_POINTS_PROMPT"
+    ],
+    [
+      961,
+      538,
+      2,
+      537,
+      3,
+      "SAM3_POINTS_PROMPT"
+    ],
+    [
+      963,
+      542,
+      0,
+      539,
+      0,
+      "VIDEO"
+    ],
+    [
+      964,
+      544,
+      0,
+      540,
+      0,
+      "MASK"
+    ],
+    [
+      965,
+      540,
+      0,
+      541,
+      0,
+      "IMAGE"
+    ],
+    [
+      966,
+      544,
+      2,
+      542,
+      0,
+      "IMAGE"
+    ],
+    [
+      968,
+      537,
+      0,
+      543,
+      1,
+      "SAM3_VIDEO_STATE"
+    ],
+    [
+      969,
+      543,
+      0,
+      544,
+      0,
+      "SAM3_VIDEO_MASKS"
+    ],
+    [
+      970,
+      543,
+      2,
+      544,
+      1,
+      "SAM3_VIDEO_STATE"
+    ],
+    [
+      971,
+      543,
+      1,
+      544,
+      2,
+      "SAM3_VIDEO_SCORES"
+    ],
+    [
+      972,
+      541,
+      0,
+      545,
+      0,
+      "VIDEO"
+    ],
+    [
+      999,
+      568,
+      17,
+      559,
+      0,
+      "STRING"
+    ],
+    [
+      1000,
+      261,
+      0,
+      560,
+      0,
+      "IMAGE"
+    ],
+    [
+      1001,
+      568,
+      4,
+      560,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1002,
+      568,
+      12,
+      560,
+      2,
+      "STRING"
+    ],
+    [
+      1006,
+      261,
+      0,
+      562,
+      0,
+      "IMAGE"
+    ],
+    [
+      1007,
+      568,
+      1,
+      562,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1008,
+      568,
+      9,
+      562,
+      2,
+      "STRING"
+    ],
+    [
+      1009,
+      261,
+      0,
+      563,
+      0,
+      "IMAGE"
+    ],
+    [
+      1010,
+      568,
+      3,
+      563,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1011,
+      568,
+      11,
+      563,
+      2,
+      "STRING"
+    ],
+    [
+      1012,
+      261,
+      0,
+      564,
+      0,
+      "IMAGE"
+    ],
+    [
+      1013,
+      568,
+      5,
+      564,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1014,
+      568,
+      13,
+      564,
+      2,
+      "STRING"
+    ],
+    [
+      1015,
+      261,
+      0,
+      565,
+      0,
+      "IMAGE"
+    ],
+    [
+      1016,
+      568,
+      6,
+      565,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1017,
+      568,
+      14,
+      565,
+      2,
+      "STRING"
+    ],
+    [
+      1018,
+      261,
+      0,
+      566,
+      0,
+      "IMAGE"
+    ],
+    [
+      1019,
+      568,
+      0,
+      566,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1020,
+      568,
+      8,
+      566,
+      2,
+      "STRING"
+    ],
+    [
+      1021,
+      261,
+      0,
+      567,
+      0,
+      "IMAGE"
+    ],
+    [
+      1022,
+      568,
+      2,
+      567,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1023,
+      568,
+      10,
+      567,
+      2,
+      "STRING"
+    ],
+    [
+      1024,
+      9,
+      0,
+      568,
+      0,
+      "IMAGE"
+    ],
+    [
+      1025,
+      256,
+      0,
+      568,
+      1,
+      "SAMHERA_API"
+    ],
+    [
+      1026,
+      9,
+      0,
+      569,
+      0,
+      "IMAGE"
+    ],
+    [
+      1028,
+      569,
+      0,
+      570,
+      0,
+      "IMAGE"
+    ],
+    [
+      1052,
+      261,
+      0,
+      579,
+      0,
+      "IMAGE"
+    ],
+    [
+      1101,
+      607,
+      0,
+      608,
+      0,
+      "IMAGE"
+    ],
+    [
+      1105,
+      540,
+      0,
+      607,
+      0,
+      "IMAGE"
+    ],
+    [
+      1106,
+      544,
+      2,
+      607,
+      1,
+      "IMAGE"
+    ],
+    [
+      1150,
+      625,
+      0,
+      538,
+      0,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1151,
+      625,
+      0,
+      569,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1154,
+      531,
+      0,
+      543,
+      0,
+      "SAM3_MODEL_CONFIG"
+    ],
+    [
+      1183,
+      568,
+      7,
+      579,
+      1,
+      "SAM3_BOX_AND_POINT"
+    ],
+    [
+      1184,
+      568,
+      0,
+      625,
+      0,
+      "SAM3_BOX_AND_POINT"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 7,
+      "title": "Masking",
+      "bounding": [
+        -990.1935603714848,
+        634.4312958048575,
+        2288.0856909589747,
+        1213.8166053148716
+      ],
+      "color": "#8A8",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 10,
+      "title": "Product",
+      "bounding": [
+        -2490.578659543869,
+        843.8640520351015,
+        1463.205078125,
+        939.6
+      ],
+      "color": "#a1309b",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 11,
+      "title": "Input",
+      "bounding": [
+        -3091.388105456333,
+        850.8478374522629,
+        570,
+        682.9843011876327
+      ],
+      "color": "#b58b2a",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 12,
+      "title": "Output",
+      "bounding": [
+        1318.2360597934412,
+        638.5576906839573,
+        652.330865174067,
+        835.9234915438471
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.4821172660282315,
+      "offset": [
+        3516.829120466431,
+        60.13337050984225
+      ]
+    },
+    "frontendVersion": "1.42.8",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true,
+    "workflow_description": "Example workflow for SAM3 video segmentation using point prompts. This demonstrates using the SAM3CreatePoint node to specify a point location (x=0.5, y=0.5 normalized coordinates) on frame 0. The point prompt is used instead of text prompts to track objects through the video. Adjust the x, y coordinates in the SAM3CreatePoint node to point to your desired object.",
+    "workflowRendererVersion": "LG",
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4
+}
