@@ -1588,6 +1588,273 @@ class SAMheraLayerPropagate:
 
 
 # =============================================================================
+# SAMheraMultiFrameAutoLayer — run Auto Layer Detect on multiple keyframes at once
+# =============================================================================
+
+class SAMheraMultiFrameAutoLayer:
+    """
+    Like SAMheraAutoLayer but accepts a batch of keyframe images with their frame indices.
+    Outputs a SAMHERA_MULTI_FRAME_LAYER_SET — a list of per-frame detections — which can
+    be fed directly into SAMheraMultiFrameLayerPropagate for multi-anchor propagation.
+    """
+
+    LAYER_PRESETS_LIST = ["auto", "portrait", "full_body", "product", "custom"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images":        ("IMAGE",),
+                "frame_indices": ("STRING", {
+                    "default": "0",
+                    "tooltip": "Comma-separated frame indices matching each image in the batch. E.g. '0,15,45'",
+                }),
+                "api":           ("SAMHERA_API",),
+                "layer_preset":  (cls.LAYER_PRESETS_LIST, {"default": "portrait"}),
+            },
+            "optional": {
+                "custom_prompt": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "One layer description per line. Used when layer_preset='custom'.",
+                }),
+                "num_pos_points": ("INT", {"default": 4, "min": 1, "max": 12,
+                    "tooltip": "Positive points per layer."}),
+                "num_neg_points": ("INT", {"default": 2, "min": 0, "max": 6,
+                    "tooltip": "Negative points per layer."}),
+            }
+        }
+
+    RETURN_TYPES = ("SAMHERA_MULTI_FRAME_LAYER_SET", "STRING", "STRING")
+    RETURN_NAMES = ("multi_frame_layer_set", "label_list", "raw_response")
+    FUNCTION = "run"
+    CATEGORY = "SAMhera"
+
+    def run(self, images, frame_indices, api, layer_preset, custom_prompt="",
+            num_pos_points=4, num_neg_points=2):
+
+        # Parse frame indices
+        raw_parts = [x.strip() for x in frame_indices.split(",")]
+        indices = []
+        for p in raw_parts:
+            try:
+                indices.append(int(p))
+            except ValueError:
+                pass
+
+        N = images.shape[0]
+        if len(indices) != N:
+            print(f"[SAMheraMultiFrameAutoLayer] {len(indices)} indices for {N} images — adjusting.")
+            while len(indices) < N:
+                indices.append((indices[-1] + 1) if indices else 0)
+            indices = indices[:N]
+
+        # Build guidance line (mirrors SAMheraAutoLayer)
+        if layer_preset == "auto":
+            guidance_line = ""
+        elif layer_preset == "custom":
+            guidance = custom_prompt.strip() or "any distinct visual elements"
+            guidance_line = f"Focus on: {guidance}"
+        else:
+            preset_guidance = {
+                "portrait":  "face skin, hair, eyes, mouth/lips, neck, clothing, accessories, background",
+                "full_body": "face/head, hair, upper clothing, lower clothing, shoes, hands/arms, accessories, background",
+                "product":   "main product, packaging, labels/text, shadow, props, background",
+            }
+            guidance_line = f"This is a {layer_preset} image. Focus on: {preset_guidance.get(layer_preset, 'distinct visual regions')}"
+
+        def _norm_pts(pts, label_val, W, H):
+            result, lbls = [], []
+            for pt in pts:
+                nx = max(0.0, min(1.0, pt[0] / 1000 if pt[0] > 1.5 else pt[0]))
+                ny = max(0.0, min(1.0, pt[1] / 1000 if pt[1] > 1.5 else pt[1]))
+                result.append([nx, ny])
+                lbls.append(label_val)
+            return {"points": result, "labels": lbls}
+
+        def _to_bundle(entry, W, H):
+            x1, y1, x2, y2 = entry["bbox"]
+            x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
+            cx = (x1n + x2n) / 2; cy = (y1n + y2n) / 2
+            boxes = {"boxes": [[cx, cy, x2n - x1n, y2n - y1n]], "labels": [True]}
+            pos   = _norm_pts(entry.get("positive", [])[:num_pos_points], 1, W, H)
+            neg   = _norm_pts(entry.get("negative", [])[:num_neg_points], 0, W, H)
+            return {"boxes": boxes, "positive": pos, "negative": neg}
+
+        multi_frame_results = []
+        all_raw = []
+        all_labels = set()
+
+        for i in range(N):
+            frame_idx = indices[i]
+            pil_img = _tensor_to_pil(images[i:i+1])
+            W, H = pil_img.size
+            print(f"[SAMheraMultiFrameAutoLayer] Frame {frame_idx} ({i+1}/{N}) — {W}x{H}")
+
+            # Call 1: Discovery
+            discovery_prompt = (
+                (f"{guidance_line}\n\n" if guidance_line else "")
+                + "Look at the image and list every distinct visual layer or region you can clearly see. "
+                "Give each a SHORT, SPECIFIC label (e.g. 'black turtleneck', 'curly brown hair'). "
+                "Max 8 layers. Skip anything not clearly visible.\n\n"
+                "Return ONLY valid JSON (no markdown):\n"
+                '{"layers": ["label1", "label2", ...]}'
+            )
+            raw1 = _call_gemini(pil_img, discovery_prompt, api)
+
+            try:
+                data1 = _parse_json(raw1)
+                discovered = [l.strip() for l in data1.get("layers", []) if isinstance(l, str) and l.strip()]
+                if not discovered:
+                    raise ValueError("empty layers list")
+            except Exception as e:
+                print(f"[SAMheraMultiFrameAutoLayer] Frame {frame_idx} discovery error: {e} — using preset")
+                discovered = LAYER_PRESETS.get(layer_preset, LAYER_PRESETS["portrait"])
+
+            # Call 2: Localization + Points
+            labels_json = json.dumps(discovered, indent=2)
+            localize_prompt = (
+                f"Image: {W}x{H} pixels. All coordinates are pixel values in this image.\n\n"
+                f"For each region in the list below, return:\n"
+                f"  • A tight bounding box (x1,y1,x2,y2, pixel coords, x1<x2, y1<y2)\n"
+                f"  • {num_pos_points} positive points INSIDE the region "
+                f"(spread across, deep inside, never on edges)\n"
+                f"  • {num_neg_points} negative points OUTSIDE the region "
+                f"(just beyond its boundary)\n\n"
+                f"Regions:\n{labels_json}\n\n"
+                "Skip any region not clearly visible. Confidence 0.0-1.0, omit below 0.3.\n\n"
+                "Return ONLY valid JSON (no markdown):\n"
+                '{"layers": [\n'
+                '  {"label": "<exact label>", "bbox": [x1,y1,x2,y2], "confidence": 0.9,\n'
+                '   "positive": [[x,y],...], "negative": [[x,y],...]},\n'
+                "  ...\n]}"
+            )
+            raw2 = _call_gemini(pil_img, localize_prompt, api)
+            all_raw.append(f"=== Frame {frame_idx} ===\nDiscovery: {raw1}\nLocalize: {raw2}")
+
+            try:
+                data = _parse_json(raw2)
+                layers = data.get("layers", [])[:8]
+            except Exception as e:
+                print(f"[SAMheraMultiFrameAutoLayer] Frame {frame_idx} localize error: {e}")
+                layers = []
+
+            layer_set = {}
+            bundles = {}
+            for entry in layers:
+                label = entry.get("label", "").strip()
+                if not label:
+                    continue
+                bundle = _to_bundle(entry, W, H)
+                bundles[label] = bundle
+                layer_set[label] = bundle["boxes"]
+                all_labels.add(label)
+
+            multi_frame_results.append({
+                "frame_idx": frame_idx,
+                "layer_set": layer_set,
+                "bundles":   bundles,
+            })
+            print(f"[SAMheraMultiFrameAutoLayer] Frame {frame_idx}: {list(bundles.keys())}")
+
+        label_list = "\n".join(sorted(all_labels))
+        raw_combined = "\n\n".join(all_raw)
+        print(f"[SAMheraMultiFrameAutoLayer] Done. {N} frames, {len(all_labels)} unique labels.")
+        return (multi_frame_results, label_list, raw_combined)
+
+
+# =============================================================================
+# SAMheraMultiFrameLayerPropagate — propagate layers with multi-frame anchors
+# =============================================================================
+
+class SAMheraMultiFrameLayerPropagate:
+    """
+    Like SAMheraLayerPropagate but uses a SAMHERA_MULTI_FRAME_LAYER_SET so each label
+    gets box prompts at every keyframe it was detected, giving SAM3 multiple anchors.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_frames":          ("IMAGE",),
+                "multi_frame_layer_set": ("SAMHERA_MULTI_FRAME_LAYER_SET",),
+                "sam3_model":            ("SAM3_MODEL",),
+            }
+        }
+
+    RETURN_TYPES = ("SAMHERA_LAYER_SET",)
+    RETURN_NAMES = ("propagated_layer_set",)
+    FUNCTION = "run"
+    CATEGORY = "SAMhera"
+
+    def _load_sam3_modules(self):
+        import importlib.util, os as _os
+        sam3_dir = _os.path.normpath(
+            _os.path.join(_os.path.dirname(__file__), "..", "..", "ComfyUI-SAM3", "nodes")
+        )
+        def _load(fname):
+            path = _os.path.join(sam3_dir, fname)
+            if not _os.path.exists(path):
+                raise ImportError(f"[SAMheraMultiFrameLayerPropagate] Not found: {path}")
+            spec = importlib.util.spec_from_file_location(
+                f"_samhera_sam3_{fname.replace('.py', '')}", path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        vs_mod = _load("video_state.py")
+        vn_mod = _load("sam3_video_nodes.py")
+        return vs_mod, vn_mod
+
+    def run(self, video_frames, multi_frame_layer_set, sam3_model):
+        vs_mod, vn_mod = self._load_sam3_modules()
+        create_video_state = vs_mod.create_video_state
+        VideoPrompt       = vs_mod.VideoPrompt
+        SAM3Propagate     = vn_mod.SAM3Propagate
+
+        # Collect all unique labels across all keyframes
+        all_labels = set()
+        for frame_data in multi_frame_layer_set:
+            all_labels.update(frame_data["layer_set"].keys())
+
+        propagator = SAM3Propagate()
+        propagated = {}
+
+        for label in all_labels:
+            # Gather box prompts for this label at every keyframe it appears
+            anchors = []
+            for frame_data in multi_frame_layer_set:
+                boxes_prompt = frame_data["layer_set"].get(label)
+                if not boxes_prompt or not boxes_prompt.get("boxes"):
+                    continue
+                frame_idx = frame_data["frame_idx"]
+                cx, cy, bw, bh = boxes_prompt["boxes"][0]
+                box_corners = [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2]
+                anchors.append((frame_idx, box_corners))
+
+            if not anchors:
+                print(f"[SAMheraMultiFrameLayerPropagate] '{label}' — no boxes in any frame, skipping")
+                continue
+
+            print(f"[SAMheraMultiFrameLayerPropagate] '{label}' — {len(anchors)} anchor(s): frames {[a[0] for a in anchors]}")
+            try:
+                video_state = create_video_state(video_frames)
+                for frame_idx, box_corners in anchors:
+                    prompt = VideoPrompt.create_box(frame_idx, 1, box_corners, is_positive=True)
+                    video_state = video_state.with_prompt(prompt)
+                result = propagator.propagate(sam3_model, video_state)
+                propagated[label] = result[0]
+                print(f"[SAMheraMultiFrameLayerPropagate] '{label}' done")
+            except Exception as e:
+                print(f"[SAMheraMultiFrameLayerPropagate] '{label}' failed: {e}")
+                propagated[label] = None
+
+        print(f"[SAMheraMultiFrameLayerPropagate] Done. {len(propagated)} layers propagated.")
+        return (propagated,)
+
+
+# =============================================================================
 # SAMheraReferenceMatch — find a subject from a reference image in a target frame
 # =============================================================================
 
@@ -2038,8 +2305,10 @@ NODE_CLASS_MAPPINGS = {
     "VLMFaceRegion":          VLMFaceRegion,
     "SAMheraCropByBox":       SAMheraCropByBox,
     "SAMheraPasteBackMask":   SAMheraPasteBackMask,
-    "SAMheraAutoLayer":       SAMheraAutoLayer,
-    "SAMheraLayerPropagate":  SAMheraLayerPropagate,
+    "SAMheraAutoLayer":                 SAMheraAutoLayer,
+    "SAMheraMultiFrameAutoLayer":       SAMheraMultiFrameAutoLayer,
+    "SAMheraLayerPropagate":            SAMheraLayerPropagate,
+    "SAMheraMultiFrameLayerPropagate":  SAMheraMultiFrameLayerPropagate,
     "SAMheraReferenceMatch":  SAMheraReferenceMatch,
     "SAMheraLayerSelector":   SAMheraLayerSelector,
     "VLMPromptEditor":        VLMPromptEditor,
@@ -2063,8 +2332,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VLMFaceRegion":          "VLM Face Region [SAMhera]",
     "SAMheraCropByBox":       "Crop by Box [SAMhera]",
     "SAMheraPasteBackMask":   "Paste Back Mask [SAMhera]",
-    "SAMheraAutoLayer":       "Auto Layer Detect [SAMhera]",
-    "SAMheraLayerPropagate":  "Layer Propagate [SAMhera]",
+    "SAMheraAutoLayer":                 "Auto Layer Detect [SAMhera]",
+    "SAMheraMultiFrameAutoLayer":       "Multi-Frame Auto Layer Detect [SAMhera]",
+    "SAMheraLayerPropagate":            "Layer Propagate [SAMhera]",
+    "SAMheraMultiFrameLayerPropagate":  "Multi-Frame Layer Propagate [SAMhera]",
     "SAMheraReferenceMatch":  "Reference Match [SAMhera]",
     "SAMheraLayerSelector":   "Layer Selector [SAMhera]",
     "VLMPromptEditor":        "VLM Prompt Editor [SAMhera]",
