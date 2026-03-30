@@ -5,21 +5,6 @@ Uses Gemini or GPT-4o to detect bounding boxes and points — no manual drawing 
 
 ---
 
-## Installation
-
-**Via ComfyUI Manager:** search `SAMhera` and install.
-
-**Manual:**
-```bash
-cd ComfyUI/custom_nodes
-git clone https://github.com/SAMhera/SAMhera
-.venv/Scripts/python.exe -m pip install google-genai openai
-```
-
-**Requirements:** [ComfyUI-SAM3](https://github.com/SAM3/ComfyUI-SAM3) must be installed.
-
----
-
 ## Setup
 
 Use `SAMheraAPIKey` to set your API key and model once, then wire the `api` output to all nodes.
