@@ -1,18 +1,25 @@
-# SAMhera
+# AutoVideoMasking (AVM)
 
 VLM-powered automatic prompt generation for SAM3 in ComfyUI.
-Uses Gemini or GPT-4o to detect bounding boxes and points — no manual drawing required.
+Uses Gemini to detect bounding boxes and points — no manual drawing required.
 
 ---
 
 ## Setup
 
-Use `SAMheraAPIKey` to set your API key and model once, then wire the `api` output to all nodes.
+### API Key
 
-| Provider | Key | Models |
+AVM resolves your API key in this order:
+
+1. **Environment variable** — `GEMINI_API_KEY`
+2. **.env file** — copy `.env.example` to `.env` in the AVM folder and fill in your key
+3. **Node UI input** — enter directly in the **AVM API Config** node (least secure, avoid in shared workflows)
+
+Place the **AVM API Config** node once on your canvas, set your model, and wire the `api` output to all other AVM nodes.
+
+| Provider | Get Key | Recommended Model |
 |---|---|---|
-| Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-2.5-flash`, `gemini-2.5-pro` (default) |
-| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `gpt-4o` |
+| Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-2.5-pro` or `gemini-2.0-flash` |
 
 ---
 
@@ -21,60 +28,61 @@ Use `SAMheraAPIKey` to set your API key and model once, then wire the `api` outp
 ### VLM Detection
 | Node | Output | Description |
 |---|---|---|
-| `VLM -> BBox (SAM3)` | box_prompt, boxes_prompt | Single object bbox |
-| `VLM -> Points (SAM3)` | positive_points, negative_points | Foreground + background points |
-| `VLM -> Multi-BBox (SAM3)` | box_1…box_5, all_boxes | Up to 5 objects |
-| `VLM -> BBox + Points (SAM3)` | box, points | Single API call for both |
-| `VLM Prompt Editor` | box, points, prompt_used | Like above + editable/overrideable prompt |
+| `AVM VLM → BBox` | box_prompt, boxes_prompt | Single object bounding box |
+| `AVM VLM → Points` | positive_points, negative_points | Foreground + background points |
+| `AVM VLM → Multi BBox` | box_1…box_5, all_boxes | Up to 5 objects |
+| `AVM VLM → BBox + Points` | box, points | Single API call for both |
+| `AVM Prompt Editor` | box, points, prompt_used | Like above + editable/overrideable prompt |
 
-### Face (SAMhera/Face)
+### Face (AVM/Face)
 | Node | Output | Description |
 |---|---|---|
-| `VLM Face Parts BBox` | hair, face, neck, face_neck, clothing | Region bboxes for face parts |
-| `VLM Face Precise Points` | box_prompt, positive_points, negative_points | Precise points for a face part |
-| `VLM Face Region` | cropped_image, crop_meta | Crops image to face region |
+| `AVM VLM → Face Parts BBox` | hair, face, neck, face_neck, clothing | Region bboxes for face parts |
+| `AVM VLM → Face Points` | box_prompt, positive_points, negative_points | Precise points for a face part |
+| `AVM Face Region` | cropped_image, crop_meta | Crops image to face region |
 
 ### Preview
 | Node | Description |
 |---|---|
-| `VLM BBox Preview` | Draws detected boxes on image |
-| `VLM Debug Preview` | Draws boxes + points overlaid on image |
+| `AVM BBox Preview` | Draws detected boxes on image |
+| `AVM Debug Preview` | Draws boxes + points overlaid on image |
 
 ### Crop / Paste
 | Node | Description |
 |---|---|
-| `SAMheraCropByBox` | Crops image to a detected box (with padding + resize) |
-| `SAMheraPasteBackMask` | Pastes a cropped mask back into the full-size image |
-| `SAMheraAutoCrop` | Auto-crops based on VLM detection |
+| `AVM Crop by Box` | Crops image to a detected box (with padding + resize) |
+| `AVM Paste Back Mask` | Pastes a cropped mask back into the full-size image |
+| `AVM Auto Crop` | Auto-crops based on VLM detection |
 
 ### Video / Layers
 | Node | Description |
 |---|---|
-| `SAMheraAddFramePrompt` | Adds VLM prompts to a SAM3 video state at a specific frame |
-| `SAMheraAddFramePromptBundle` | Bundles multiple frame prompts into one |
-| `SAMheraUnpackBundle` | Unpacks a bundle back into individual prompts |
-| `SAMheraAutoLayer` | Detects and layers objects across a video |
-| `SAMheraLayerPropagate` | Propagates a layer set through video |
-| `SAMheraMultiFrameAutoLayer` | Multi-frame version of AutoLayer |
-| `SAMheraMultiFrameLayerPropagate` | Multi-frame propagation |
-| `SAMheraReferenceMatch` | Matches objects across frames using a reference |
-| `SAMheraLayerSelector` | Selects a specific layer from a layer set |
+| `AVM Add Frame Prompt` | Adds VLM prompts to a SAM3 video state at a specific frame |
+| `AVM Frame Prompt Bundle` | Bundles multiple frame prompts into one |
+| `AVM Unpack Bundle` | Unpacks a bundle back into individual prompts |
+| `AVM Auto Layer Detect` | Detects and layers objects across a video |
+| `AVM Layer Propagate` | Propagates a layer set through video |
+| `AVM Multi-Frame Layer Detect` | Multi-frame version of Auto Layer Detect |
+| `AVM Multi-Frame Layer Propagate` | Multi-frame propagation |
+| `AVM Reference Match` | Matches objects across frames using a reference |
+| `AVM Layer Selector` | Selects a specific layer from a layer set |
 
 ### Utility
 | Node | Description |
 |---|---|
-| `SAMheraAPIKey` | Stores API key + model name, wire to all nodes |
-| `VLM Image Test` | Verifies the VLM is receiving images correctly |
+| `AVM API Config` | Sets API key + model name — wire `api` output to all nodes |
+| `AVM VLM Test` | Verifies the VLM is receiving images correctly |
+| `AVM Reload` | Hot-reloads node code without restarting ComfyUI |
 
 ---
 
 ## Tips
 
-- Wire `SAMheraAPIKey` once and reuse — avoids entering credentials per node
-- Use `bbox_context` on `VLM -> Points` to keep boxes and points consistent
+- Wire **AVM API Config** once and reuse — avoids entering credentials per node
+- Use `bbox_context` on `AVM VLM → Points` to keep boxes and points consistent
 - `num_fg_points` 6–8 and `num_bg_points` 3–4 work well for most subjects
-- `VLM Prompt Editor` lets you inspect and override the exact prompt sent to the VLM
-- `SAMheraCropByBox` → segment → `SAMheraPasteBackMask` for high-res face/object workflows
+- **AVM Prompt Editor** lets you inspect and override the exact prompt sent to the VLM
+- **AVM Crop by Box** → segment → **AVM Paste Back Mask** for high-res face/object workflows
 
 ---
 

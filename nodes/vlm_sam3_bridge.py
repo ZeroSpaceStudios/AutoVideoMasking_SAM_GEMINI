@@ -13,6 +13,7 @@ Coordinate conventions (must match segmentation.py):
   SAM3_POINTS_PROMPT: {"points": [...], "labels": [...]}
 """
 
+import os
 import re
 import json
 import io
@@ -20,6 +21,36 @@ import numpy as np
 from PIL import Image
 
 DEFAULT_MODEL = "gemini-2.5-pro"
+
+# Path to .env file in the package root (one level up from nodes/)
+_ENV_FILE = os.path.join(os.path.dirname(__file__), "..", ".env")
+
+
+def _resolve_api_key(ui_key: str) -> str:
+    """Tiered API key lookup: env var → .env file → UI input."""
+    # 1. System environment variable
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if key:
+        print("[AVM] API key loaded from environment variable.")
+        return key
+    # 2. .env file
+    env_path = os.path.normpath(_ENV_FILE)
+    if os.path.isfile(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("GEMINI_API_KEY="):
+                    key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if key:
+                        print("[AVM] API key loaded from .env file.")
+                        return key
+    # 3. UI input
+    if ui_key.strip():
+        print("[AVM] API key loaded from node UI input.")
+        return ui_key.strip()
+    raise ValueError(
+        "[AVM] No API key found. Set GEMINI_API_KEY env var, add it to .env, or enter it in the node."
+    )
 
 
 # =============================================================================
@@ -32,9 +63,12 @@ class SAMheraAPIKey:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "api_key":    ("STRING", {"default": "", "multiline": False}),
                 "model_name": ("STRING", {"default": DEFAULT_MODEL, "multiline": False,
-                               "tooltip": "e.g. gemini-2.5-pro or gemini-3.1-pro-preview"}),
+                               "tooltip": "e.g. gemini-2.5-pro or gemini-2.0-flash"}),
+            },
+            "optional": {
+                "api_key": ("STRING", {"default": "", "multiline": False,
+                            "tooltip": "Leave blank to use GEMINI_API_KEY env var or .env file"}),
             }
         }
 
@@ -43,8 +77,9 @@ class SAMheraAPIKey:
     FUNCTION      = "run"
     CATEGORY      = "AVM"
 
-    def run(self, api_key, model_name):
-        return ({"api_key": api_key, "model_name": model_name},)
+    def run(self, model_name, api_key=""):
+        resolved_key = _resolve_api_key(api_key)
+        return ({"api_key": resolved_key, "model_name": model_name},)
 
 
 # -- helpers ------------------------------------------------------------------
@@ -2318,7 +2353,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAMheraAPIKey":          "AVM API Key",
+    "SAMheraAPIKey":          "AVM API Config",
     "VLMImageTest":           "AVM VLM Test",
     "VLMtoBBoxAndPoints":     "AVM VLM → BBox + Points",
     "VLMtoBBox":              "AVM VLM → BBox",
