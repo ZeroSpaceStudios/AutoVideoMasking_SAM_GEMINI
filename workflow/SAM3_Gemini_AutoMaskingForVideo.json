@@ -1623,8 +1623,8 @@
         "Node name for S&R": "SAMheraAPIKey"
       },
       "widgets_values": [
-        "",
-        "gemini-3.1-pro-preview"
+        "gemini-3.1-pro-preview",
+        ""
       ]
     }
   ],
