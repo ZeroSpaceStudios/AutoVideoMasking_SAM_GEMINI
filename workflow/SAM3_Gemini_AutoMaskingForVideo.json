@@ -39,7 +39,7 @@
     },
     {
       "id": 563,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1320.57865954387,
         917.4640520351021
@@ -85,9 +85,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -99,7 +99,7 @@
     },
     {
       "id": 565,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1610.57865954387,
         1387.4640520351045
@@ -145,9 +145,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -159,7 +159,7 @@
     },
     {
       "id": 564,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1910.5786595438701,
         1377.4640520351045
@@ -205,9 +205,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -219,7 +219,7 @@
     },
     {
       "id": 579,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1316.974835755829,
         1389.2476694366717
@@ -256,9 +256,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -270,7 +270,7 @@
     },
     {
       "id": 566,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -2212.5736221502602,
         928.4364605246767
@@ -316,69 +316,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
-      },
-      "widgets_values": [
-        "",
-        16,
-        0,
-        true,
-        1008
-      ]
-    },
-    {
-      "id": 560,
-      "type": "SAMheraCropByBox",
-      "pos": [
-        -2200.5786595438685,
-        1377.4640520351045
-      ],
-      "size": [
-        273.205078125,
-        386
-      ],
-      "flags": {},
-      "order": 12,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 1000
-        },
-        {
-          "name": "boxes_prompt",
-          "type": "SAM3_BOX_AND_POINT",
-          "link": 1001
-        },
-        {
-          "name": "label",
-          "shape": 7,
-          "type": "STRING",
-          "widget": {
-            "name": "label"
-          },
-          "link": 1002
-        }
-      ],
-      "outputs": [
-        {
-          "name": "cropped_image",
-          "type": "IMAGE",
-          "links": null
-        },
-        {
-          "name": "crop_meta",
-          "type": "CROP_META",
-          "links": null
-        }
-      ],
-      "properties": {
-        "aux_id": "HeraKang000/SAMhera",
-        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -390,7 +330,7 @@
     },
     {
       "id": 562,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1918.6833309133797,
         945.7231046005334
@@ -436,9 +376,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -450,7 +390,7 @@
     },
     {
       "id": 567,
-      "type": "SAMheraCropByBox",
+      "type": "AVMCropByBox",
       "pos": [
         -1618.1001008368428,
         923.8562694074419
@@ -496,9 +436,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
-        "Node name for S&R": "SAMheraCropByBox"
+        "Node name for S&R": "AVMCropByBox"
       },
       "widgets_values": [
         "",
@@ -538,94 +478,6 @@
         "Node name for S&R": "PreviewImage"
       },
       "widgets_values": []
-    },
-    {
-      "id": 9,
-      "type": "VHS_LoadVideo",
-      "pos": [
-        -3081.388105456333,
-        924.4478374522629
-      ],
-      "size": [
-        255.8291015625,
-        599.3843011876327
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "meta_batch",
-          "shape": 7,
-          "type": "VHS_BatchManager",
-          "link": null
-        },
-        {
-          "name": "vae",
-          "shape": 7,
-          "type": "VAE",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            470,
-            959,
-            1024,
-            1026
-          ]
-        },
-        {
-          "name": "frame_count",
-          "type": "INT",
-          "links": null
-        },
-        {
-          "name": "audio",
-          "type": "AUDIO",
-          "links": null
-        },
-        {
-          "name": "video_info",
-          "type": "VHS_VIDEOINFO",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-videohelpersuite",
-        "ver": "1.7.7",
-        "Node name for S&R": "VHS_LoadVideo",
-        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": {
-        "video": "Chanel_Bag.mp4",
-        "force_rate": 0,
-        "custom_width": 0,
-        "custom_height": 0,
-        "frame_load_cap": 60,
-        "skip_first_frames": 0,
-        "select_every_nth": 1,
-        "format": "AnimateDiff",
-        "videopreview": {
-          "hidden": false,
-          "paused": false,
-          "params": {
-            "filename": "Chanel_Bag.mp4",
-            "type": "input",
-            "format": "video/mp4",
-            "force_rate": 0,
-            "custom_width": 0,
-            "custom_height": 0,
-            "frame_load_cap": 60,
-            "skip_first_frames": 0,
-            "select_every_nth": 1
-          }
-        }
-      }
     },
     {
       "id": 569,
@@ -684,7 +536,7 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "a4f65fc9cea93537d0027daef570e9e40fd078c6",
         "Node name for S&R": "VLMDebugPreview"
       },
@@ -759,7 +611,7 @@
       "flags": {
         "collapsed": false
       },
-      "order": 1,
+      "order": 0,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -924,7 +776,7 @@
     },
     {
       "id": 538,
-      "type": "SAMheraUnpackBundle",
+      "type": "AVMUnpackBundle",
       "pos": [
         -624.9522547221809,
         752.536559581133
@@ -967,9 +819,9 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "a196b2e5e2ba620b77a642ee2174527ecb60624b",
-        "Node name for S&R": "SAMheraUnpackBundle"
+        "Node name for S&R": "AVMUnpackBundle"
       },
       "widgets_values": []
     },
@@ -1275,8 +1127,282 @@
       ]
     },
     {
+      "id": 607,
+      "type": "ImageConcanate",
+      "pos": [
+        1336.5759833432774,
+        712.1576906839573
+      ],
+      "size": [
+        270,
+        102
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image1",
+          "type": "IMAGE",
+          "link": 1105
+        },
+        {
+          "name": "image2",
+          "type": "IMAGE",
+          "link": 1106
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1101
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "7519171dd6b6ccea43091c6b73e42443bba11f5b",
+        "Node name for S&R": "ImageConcanate",
+        "aux_id": "kijai/ComfyUI-KJNodes"
+      },
+      "widgets_values": [
+        "right",
+        true
+      ]
+    },
+    {
+      "id": 608,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1328.2360597934412,
+        758.982623218993
+      ],
+      "size": [
+        632.330865174067,
+        521.4937451326523
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 1101
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "449839959f0153fb8a57211a9364c55163935ca9",
+        "Node name for S&R": "VHS_VideoCombine",
+        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite"
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "AnimateDiff",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "AnimateDiff_00001.mp4",
+            "subfolder": "",
+            "type": "output",
+            "format": "video/h264-mp4",
+            "frame_rate": 24,
+            "workflow": "AnimateDiff_00001.png",
+            "fullpath": "D:\\ComfyUI_windows_portable\\ComfyUI\\output\\AnimateDiff_00001.mp4"
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        -3081.388105456333,
+        924.4478374522629
+      ],
+      "size": [
+        255.8291015625,
+        456.1844645700637
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            470,
+            959,
+            1024,
+            1026
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "1.7.7",
+        "Node name for S&R": "VHS_LoadVideo",
+        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": {
+        "video": "bedroom.mp4",
+        "force_rate": 0,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 60,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "bedroom.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "force_rate": 0,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 60,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      }
+    },
+    {
+      "id": 560,
+      "type": "AVMCropByBox",
+      "pos": [
+        -2200.5786595438685,
+        1377.4640520351045
+      ],
+      "size": [
+        273.205078125,
+        386
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1000
+        },
+        {
+          "name": "boxes_prompt",
+          "type": "SAM3_BOX_AND_POINT",
+          "link": 1001
+        },
+        {
+          "name": "label",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": 1002
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cropped_image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "crop_meta",
+          "type": "CROP_META",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
+        "ver": "ccb66d7fe6f97ee1053299b78df0e650f5dabd6c",
+        "Node name for S&R": "AVMCropByBox"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        true,
+        1008
+      ]
+    },
+    {
       "id": 568,
-      "type": "SAMheraAutoLayer",
+      "type": "AVMAutoLayer",
       "pos": [
         -2480.578659543869,
         917.4640520351021
@@ -1298,7 +1424,7 @@
         },
         {
           "name": "api",
-          "type": "SAMHERA_API",
+          "type": "AVM_API",
           "link": 1025
         }
       ],
@@ -1416,7 +1542,7 @@
         },
         {
           "name": "layer_set",
-          "type": "SAMHERA_LAYER_SET",
+          "type": "AVM_LAYER_SET",
           "links": null
         },
         {
@@ -1433,12 +1559,12 @@
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "e0ebf664f57781afc1e5c7c393928c2732f59891",
-        "Node name for S&R": "SAMheraAutoLayer"
+        "Node name for S&R": "AVMAutoLayer"
       },
       "widgets_values": [
-        "product",
+        "full_body",
         "",
         4,
         2
@@ -1468,134 +1594,8 @@
       "bgcolor": "#653"
     },
     {
-      "id": 607,
-      "type": "ImageConcanate",
-      "pos": [
-        1336.5759833432774,
-        712.1576906839573
-      ],
-      "size": [
-        270,
-        102
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 25,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image1",
-          "type": "IMAGE",
-          "link": 1105
-        },
-        {
-          "name": "image2",
-          "type": "IMAGE",
-          "link": 1106
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            1101
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "7519171dd6b6ccea43091c6b73e42443bba11f5b",
-        "Node name for S&R": "ImageConcanate",
-        "aux_id": "kijai/ComfyUI-KJNodes"
-      },
-      "widgets_values": [
-        "right",
-        true
-      ]
-    },
-    {
-      "id": 608,
-      "type": "VHS_VideoCombine",
-      "pos": [
-        1328.2360597934412,
-        758.982623218993
-      ],
-      "size": [
-        632.330865174067,
-        705.4985590088115
-      ],
-      "flags": {},
-      "order": 28,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 1101
-        },
-        {
-          "name": "audio",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": null
-        },
-        {
-          "name": "meta_batch",
-          "shape": 7,
-          "type": "VHS_BatchManager",
-          "link": null
-        },
-        {
-          "name": "vae",
-          "shape": 7,
-          "type": "VAE",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "Filenames",
-          "type": "VHS_FILENAMES",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-videohelpersuite",
-        "ver": "449839959f0153fb8a57211a9364c55163935ca9",
-        "Node name for S&R": "VHS_VideoCombine",
-        "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite"
-      },
-      "widgets_values": {
-        "frame_rate": 24,
-        "loop_count": 0,
-        "filename_prefix": "AnimateDiff",
-        "format": "video/h264-mp4",
-        "pix_fmt": "yuv420p",
-        "crf": 19,
-        "save_metadata": true,
-        "trim_to_audio": false,
-        "pingpong": false,
-        "save_output": true,
-        "videopreview": {
-          "hidden": false,
-          "paused": false,
-          "params": {
-            "filename": "AnimateDiff_00005.mp4",
-            "subfolder": "",
-            "type": "output",
-            "format": "video/h264-mp4",
-            "frame_rate": 24,
-            "workflow": "AnimateDiff_00005.png",
-            "fullpath": "/workspace/ComfyUI/output/AnimateDiff_00005.mp4"
-          }
-        }
-      }
-    },
-    {
       "id": 256,
-      "type": "SAMheraAPIKey",
+      "type": "AVMAPIConfig",
       "pos": [
         -2801.388105456333,
         1134.4478374522632
@@ -1611,16 +1611,16 @@
       "outputs": [
         {
           "name": "api",
-          "type": "SAMHERA_API",
+          "type": "AVM_API",
           "links": [
             1025
           ]
         }
       ],
       "properties": {
-        "aux_id": "HeraKang000/SAMhera",
+        "aux_id": "ZeroSpaceStudios/ComfyUI-AutoVideoMasking",
         "ver": "e4b71410aace1419dbb330f17ba160d7bf29231e",
-        "Node name for S&R": "SAMheraAPIKey"
+        "Node name for S&R": "AVMAPIConfig"
       },
       "widgets_values": [
         "gemini-3.1-pro-preview",
@@ -1923,7 +1923,7 @@
       0,
       568,
       1,
-      "SAMHERA_API"
+      "AVM_API"
     ],
     [
       1026,
@@ -2071,10 +2071,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.4821172660282315,
+      "scale": 1.136807294222505,
       "offset": [
-        3516.829120466431,
-        60.13337050984225
+        3568.9341477213943,
+        -836.7631904277142
       ]
     },
     "frontendVersion": "1.42.8",
