@@ -2,7 +2,7 @@
 AVM Utilities
 Non-SAM helper nodes for the AVM package.
 
-Author: AVM
+Author: Hera Kang
 """
 
 

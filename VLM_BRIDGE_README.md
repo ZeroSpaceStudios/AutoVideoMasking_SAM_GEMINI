@@ -1,6 +1,6 @@
 # VLM → SAM3 Bridge
 
-**Author: ZeroSpace Studios**
+**Author: Hera Kang**
 
 Auto-generate bounding boxes and point prompts for SAM3 using a Vision Language Model (Gemini / OpenAI), eliminating the need to manually draw boxes or click points.
 

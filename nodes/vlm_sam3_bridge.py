@@ -4,7 +4,7 @@ Calls Gemini to auto-generate bbox or point prompts,
 then outputs native SAM3_BOX_PROMPT / SAM3_POINTS_PROMPT types that wire
 directly into SAM3Segmentation or SAM3Grounding.
 
-Author: ZeroSpace Studios
+Author: Hera Kang
 
 Coordinate conventions (must match segmentation.py):
   SAM3_BOX_PROMPT   : {"box": [cx, cy, w, h],  "label": bool}   - normalized [0,1]

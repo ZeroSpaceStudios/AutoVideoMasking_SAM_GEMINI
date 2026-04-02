@@ -4,7 +4,7 @@ AutoVideoMasking (AVM) - VLM-powered auto prompting for SAM3
 Automatically generates bounding boxes and point prompts for SAM3
 using Vision Language Models (Gemini).
 
-Author: ZeroSpace Studios
+Author: Hera Kang
 Version: 1.0.0
 License: MIT
 """
@@ -14,7 +14,7 @@ import sys
 import traceback
 
 __version__ = "1.0.0"
-__author__ = "ZeroSpace Studios"
+__author__ = "Hera Kang"
 
 INIT_SUCCESS = False
 
