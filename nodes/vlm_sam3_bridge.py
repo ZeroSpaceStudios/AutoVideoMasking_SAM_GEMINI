@@ -20,7 +20,8 @@ import io
 import numpy as np
 from PIL import Image
 
-DEFAULT_MODEL = "gemini-2.5-pro"
+AVAILABLE_MODELS = ["gemini-3.1-pro-preview", "gemini-3-flash-preview"]
+DEFAULT_MODEL = AVAILABLE_MODELS[0]
 
 # Path to .env file in the package root (one level up from nodes/)
 _ENV_FILE = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -63,8 +64,8 @@ class AVMAPIConfig:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_name": ("STRING", {"default": DEFAULT_MODEL, "multiline": False,
-                               "tooltip": "e.g. gemini-2.5-pro or gemini-2.0-flash"}),
+                "model_name": (AVAILABLE_MODELS, {"default": DEFAULT_MODEL,
+                               "tooltip": "Gemini model to use for VLM inference"}),
             },
             "optional": {
                 "api_key": ("STRING", {"default": "", "multiline": False,

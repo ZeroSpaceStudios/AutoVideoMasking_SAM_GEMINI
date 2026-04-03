@@ -19,7 +19,7 @@ Place the **AVM API Config** node once on your canvas, set your model, and wire 
 
 | Provider | Get Key | Recommended Model |
 |---|---|---|
-| Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-2.5-pro` or `gemini-2.0-flash` |
+| Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-3.1-pro-preview` or `gemini-3-flash-preview` |
 
 ---
 
