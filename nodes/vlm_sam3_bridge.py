@@ -289,8 +289,7 @@ class VLMtoBBox:
             data = _parse_json(raw)
             x1, y1, x2, y2 = data["bbox"]
         except Exception as e:
-            print(f"[VLMtoBBox] Parse error: {e} -- full-image fallback")
-            x1, y1, x2, y2 = 0, 0, W, H
+            raise RuntimeError(f"[VLMtoBBox] Failed to parse Gemini response: {e}\nRaw: {raw}") from e
 
         x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
         cx = (x1n + x2n) / 2;  cy = (y1n + y2n) / 2
@@ -370,8 +369,7 @@ class VLMtoPoints:
             pos_raw = data.get("positive", [[crop_w//2, crop_h//2]])
             neg_raw = data.get("negative", [])
         except Exception as e:
-            print(f"[VLMtoPoints] Parse error: {e}")
-            pos_raw = [[crop_w//2, crop_h//2]]; neg_raw = []
+            raise RuntimeError(f"[VLMtoPoints] Failed to parse Gemini response: {e}\nRaw: {raw}") from e
 
         pos_raw = pos_raw[:num_pos_points]
         neg_raw = neg_raw[:num_neg_points]
@@ -431,7 +429,8 @@ class VLMtoMultiBBox:
         try:
             objects = _parse_json(raw).get("objects", [])[:max_objects]
         except Exception as e:
-            print(f"[VLMtoMultiBBox] Parse error: {e}"); objects = []
+            print(f"[AVM ERROR] VLMtoMultiBBox failed to parse response: {e}\nRaw: {raw}")
+            objects = []
 
         def to_boxes(obj):
             x1, y1, x2, y2 = obj["bbox"]
@@ -504,9 +503,7 @@ class VLMtoBBoxAndPoints:
             pos_raw = data.get("positive", [[W//2, H//2]])
             neg_raw = data.get("negative", [])
         except Exception as e:
-            print(f"[VLMtoBBoxAndPoints] Parse error: {e}")
-            x1, y1, x2, y2 = 0, 0, W, H
-            pos_raw = [[W//2, H//2]]; neg_raw = []
+            raise RuntimeError(f"[VLMtoBBoxAndPoints] Failed to parse Gemini response: {e}\nRaw: {raw}") from e
 
         pos_raw = pos_raw[:num_pos_points]
         neg_raw = neg_raw[:num_neg_points]
@@ -608,9 +605,7 @@ class VLMPromptEditor:
             pos_raw = data.get("positive", [[W//2, H//2]])
             neg_raw = data.get("negative", [])
         except Exception as e:
-            print(f"[VLMPromptEditor] Parse error: {e}")
-            x1, y1, x2, y2 = 0, 0, W, H
-            pos_raw = [[W//2, H//2]]; neg_raw = []
+            raise RuntimeError(f"[VLMPromptEditor] Failed to parse Gemini response: {e}\nRaw: {raw}") from e
 
         print(f"[VLMPromptEditor] Image size received: {W}x{H}, "
               f"bbox pixel: {x1},{y1},{x2},{y2}, "
@@ -1051,7 +1046,8 @@ class VLMFacePartsBBox:
         try:
             data = _parse_json(raw)
         except Exception as e:
-            print(f"[VLMFacePartsBBox] Parse error: {e}"); data = {}
+            print(f"[AVM ERROR] VLMFacePartsBBox failed to parse response: {e}\nRaw: {raw}")
+            data = {}
 
         empty = {"boxes": [], "labels": []}
 
@@ -1199,10 +1195,7 @@ class VLMFacePrecisePoints:
             fg_raw = data.get("foreground", [[cW//2, cH//2]])
             bg_raw = data.get("background", [])
         except Exception as e:
-            print(f"[VLMFacePrecisePoints] Parse error: {e} — fallback to full crop")
-            x1, y1, x2, y2 = 0, 0, cW, cH
-            fg_raw = [[cW//2, cH//2]]
-            bg_raw = []
+            raise RuntimeError(f"[VLMFacePrecisePoints] Failed to parse Gemini response: {e}\nRaw: {raw}") from e
 
         fg_raw = fg_raw[:num_fg_points]
         bg_raw = bg_raw[:num_bg_points]
@@ -1332,8 +1325,7 @@ class VLMFaceRegion:
         try:
             bx1, by1, bx2, by2 = _parse_json(raw1)["bbox"]
         except Exception as e:
-            print(f"[VLMFaceRegion] Stage1 parse error: {e}")
-            bx1, by1, bx2, by2 = 0, 0, sW, sH
+            raise RuntimeError(f"[VLMFaceRegion] Stage1 failed to parse Gemini response: {e}\nRaw: {raw1}") from e
 
         # Map to full-image pixel space
         if any(v > 2.0 for v in [bx1, by1, bx2, by2]):
@@ -1371,8 +1363,7 @@ class VLMFaceRegion:
             fg_raw = d2.get("foreground", [[cW//2, cH//2]])
             bg_raw = d2.get("background", [])
         except Exception as e:
-            print(f"[VLMFaceRegion] Stage2 parse error: {e}")
-            fg_raw = [[cW//2, cH//2]]; bg_raw = []
+            raise RuntimeError(f"[VLMFaceRegion] Stage2 failed to parse Gemini response: {e}\nRaw: {raw2}") from e
 
         fg_raw = fg_raw[:num_fg_points]
         bg_raw = bg_raw[:num_bg_points]
@@ -1896,7 +1887,8 @@ class VLMReferenceMatch:
             boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [True]}
             print(f"[VLMReferenceMatch] box (cx,cy,w,h): [{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}]")
         except Exception as e:
-            print(f"[VLMReferenceMatch] Parse error: {e}"); boxes_prompt = empty
+            print(f"[AVM ERROR] VLMReferenceMatch failed to parse response: {e}\nRaw: {raw}")
+            boxes_prompt = empty
 
         return (boxes_prompt, raw)
 
