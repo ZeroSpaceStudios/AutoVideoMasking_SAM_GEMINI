@@ -99,6 +99,26 @@ def _maybe_normalize_corners(x1, y1, x2, y2, W, H):
         return x1/1000, y1/1000, x2/1000, y2/1000
     return x1, y1, x2, y2
 
+def normalize_points(pts_raw, label_val, W=1000, H=1000):
+    """Clamp Gemini points to [0,1]. Divides by W/H if value > 1.5, else treats as already normalized."""
+    result, lbls = [], []
+    for pt in pts_raw:
+        nx = max(0.0, min(1.0, pt[0] / W if pt[0] > 1.5 else pt[0]))
+        ny = max(0.0, min(1.0, pt[1] / H if pt[1] > 1.5 else pt[1]))
+        result.append([nx, ny])
+        lbls.append(label_val)
+    return {"points": result, "labels": lbls}
+
+def normalize_points_crop_to_full(pts_raw, label_val, crop_w, crop_h, crop_x1, crop_y1, full_W, full_H):
+    """Map crop-space Gemini points into full-image [0,1] coords."""
+    result, lbls = [], []
+    for pt in pts_raw:
+        abs_x = (pt[0] / 1000 * crop_w + crop_x1) if pt[0] > 1.5 else (pt[0] * crop_w + crop_x1)
+        abs_y = (pt[1] / 1000 * crop_h + crop_y1) if pt[1] > 1.5 else (pt[1] * crop_h + crop_y1)
+        result.append([max(0.0, min(1.0, abs_x / full_W)), max(0.0, min(1.0, abs_y / full_H))])
+        lbls.append(label_val)
+    return {"points": result, "labels": lbls}
+
 def _call_gemini(pil_img, prompt, api):
     try:
         from google import genai
@@ -287,19 +307,8 @@ class VLMtoPoints:
         pos_raw = pos_raw[:num_pos_points]
         neg_raw = neg_raw[:num_neg_points]
 
-        def to_norm(pts_raw, label_val):
-            pts, lbls = [], []
-            for pt in pts_raw:
-                x, y = pt[0], pt[1]
-                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
-                abs_x = (x / 1000 * crop_w + crop_x1) if x > 1.5 else (x * crop_w + crop_x1)
-                abs_y = (y / 1000 * crop_h + crop_y1) if y > 1.5 else (y * crop_h + crop_y1)
-                pts.append([max(0.0, min(1.0, abs_x / W)), max(0.0, min(1.0, abs_y / H))])
-                lbls.append(label_val)
-            return {"points": pts, "labels": lbls}
-
-        positive_points = to_norm(pos_raw, 1)
-        negative_points = to_norm(neg_raw, 0)
+        positive_points = normalize_points_crop_to_full(pos_raw, 1, crop_w, crop_h, crop_x1, crop_y1, W, H)
+        negative_points = normalize_points_crop_to_full(neg_raw, 0, crop_w, crop_h, crop_x1, crop_y1, W, H)
         return (positive_points, negative_points, raw)
 
 
@@ -444,17 +453,8 @@ class VLMtoBBoxAndPoints:
         box_prompt   = {"box":   [cx, cy, bw, bh], "label": is_positive}
         boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [is_positive]}
 
-        def to_norm(pts, label_val):
-            result, lbls = [], []
-            for pt in pts:
-                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
-                nx = max(0.0, min(1.0, pt[0]/1000 if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1]/1000 if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny]); lbls.append(label_val)
-            return {"points": result, "labels": lbls}
-
-        positive_points = to_norm(pos_raw, 1)
-        negative_points = to_norm(neg_raw, 0)
+        positive_points = normalize_points(pos_raw, 1)
+        negative_points = normalize_points(neg_raw, 0)
 
         box_and_point = {
             "boxes":    boxes_prompt,
@@ -557,17 +557,8 @@ class VLMPromptEditor:
         box_prompt   = {"box":   [cx, cy, bw, bh], "label": is_positive}
         boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [is_positive]}
 
-        def to_norm(pts, label_val):
-            result, lbls = [], []
-            for pt in pts:
-                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
-                nx = max(0.0, min(1.0, pt[0]/1000 if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1]/1000 if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny]); lbls.append(label_val)
-            return {"points": result, "labels": lbls}
-
-        positive_points = to_norm(pos_raw, 1)
-        negative_points = to_norm(neg_raw, 0)
+        positive_points = normalize_points(pos_raw, 1)
+        negative_points = normalize_points(neg_raw, 0)
 
         print(f"[VLMPromptEditor] box:[{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}] "
               f"pos:{len(positive_points['points'])} neg:{len(negative_points['points'])}")
@@ -1162,23 +1153,8 @@ class VLMFacePrecisePoints:
         box_prompt   = {"box":   [cx, cy, bw, bh], "label": True}
         boxes_prompt = {"boxes": [[cx, cy, bw, bh]], "labels": [True]}
 
-        # Normalize points back to full image
-        def _norm_pts(pts_raw, label_val):
-            pts, lbls = [], []
-            for pt in pts_raw:
-                px, py = pt[0], pt[1]
-                # Handle if Gemini returns normalized [0-1] instead of pixels
-                # Gemini uses 0-1000 scale; values <= 1.5 are already normalized 0-1
-                abs_x = (px / 1000 * cW) if px > 1.5 else (px * cW)
-                abs_y = (py / 1000 * cH) if py > 1.5 else (py * cH)
-                nx = max(0.0, min(1.0, (abs_x + crop_x1) / W))
-                ny = max(0.0, min(1.0, (abs_y + crop_y1) / H))
-                pts.append([nx, ny])
-                lbls.append(label_val)
-            return {"points": pts, "labels": lbls}
-
-        positive_points = _norm_pts(fg_raw, 1)
-        negative_points = _norm_pts(bg_raw, 0)
+        positive_points = normalize_points_crop_to_full(fg_raw, 1, cW, cH, crop_x1, crop_y1, W, H)
+        negative_points = normalize_points_crop_to_full(bg_raw, 0, cW, cH, crop_x1, crop_y1, W, H)
 
         print(f"[VLMFacePrecisePoints] box:[{cx:.3f},{cy:.3f},{bw:.3f},{bh:.3f}] "
               f"fg:{len(positive_points['points'])} bg:{len(negative_points['points'])}")
@@ -1338,17 +1314,8 @@ class VLMFaceRegion:
         box_prompt   = {"box":   [0.5, 0.5, 1.0, 1.0], "label": True}
         boxes_prompt = {"boxes": [[0.5, 0.5, 1.0, 1.0]], "labels": [True]}
 
-        def _to_crop_norm(pts_raw, label_val):
-            pts, lbls = [], []
-            for pt in pts_raw:
-                px, py = pt[0], pt[1]
-                nx = max(0.0, min(1.0, (px / cW) if px > 1.5 else px))
-                ny = max(0.0, min(1.0, (py / cH) if py > 1.5 else py))
-                pts.append([nx, ny]); lbls.append(label_val)
-            return {"points": pts, "labels": lbls}
-
-        positive_points = _to_crop_norm(fg_raw, 1)
-        negative_points = _to_crop_norm(bg_raw, 0)
+        positive_points = normalize_points(fg_raw, 1, W=cW, H=cH)
+        negative_points = normalize_points(bg_raw, 0, W=cW, H=cH)
 
         print(f"[VLMFaceRegion] crop=[{cx1},{cy1},{cx2},{cy2}] "
               f"fg:{len(positive_points['points'])} bg:{len(negative_points['points'])}")
@@ -1512,21 +1479,13 @@ class AVMAutoLayer:
         empty_pts    = {"points": [], "labels": []}
         empty_bundle = {"boxes": empty_boxes, "positive": empty_pts, "negative": empty_pts}
 
-        def _norm_pts(pts, label_val):
-            result, lbls = [], []
-            for pt in pts:
-                nx = max(0.0, min(1.0, pt[0] / 1000 if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1] / 1000 if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny]); lbls.append(label_val)
-            return {"points": result, "labels": lbls}
-
         def _to_bundle(entry):
             x1, y1, x2, y2 = entry["bbox"]
             x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
             cx = (x1n + x2n) / 2; cy = (y1n + y2n) / 2
             boxes = {"boxes": [[cx, cy, x2n - x1n, y2n - y1n]], "labels": [True]}
-            pos   = _norm_pts(entry.get("positive", [])[:num_pos_points], 1)
-            neg   = _norm_pts(entry.get("negative", [])[:num_neg_points], 0)
+            pos   = normalize_points(entry.get("positive", [])[:num_pos_points], 1)
+            neg   = normalize_points(entry.get("negative", [])[:num_neg_points], 0)
             return {"boxes": boxes, "positive": pos, "negative": neg}
 
         bundles = [_to_bundle(l) for l in layers]
@@ -1698,22 +1657,13 @@ class AVMMultiFrameAutoLayer:
             }
             guidance_line = f"This is a {layer_preset} image. Focus on: {preset_guidance.get(layer_preset, 'distinct visual regions')}"
 
-        def _norm_pts(pts, label_val, W, H):
-            result, lbls = [], []
-            for pt in pts:
-                nx = max(0.0, min(1.0, pt[0] / 1000 if pt[0] > 1.5 else pt[0]))
-                ny = max(0.0, min(1.0, pt[1] / 1000 if pt[1] > 1.5 else pt[1]))
-                result.append([nx, ny])
-                lbls.append(label_val)
-            return {"points": result, "labels": lbls}
-
         def _to_bundle(entry, W, H):
             x1, y1, x2, y2 = entry["bbox"]
             x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
             cx = (x1n + x2n) / 2; cy = (y1n + y2n) / 2
             boxes = {"boxes": [[cx, cy, x2n - x1n, y2n - y1n]], "labels": [True]}
-            pos   = _norm_pts(entry.get("positive", [])[:num_pos_points], 1, W, H)
-            neg   = _norm_pts(entry.get("negative", [])[:num_neg_points], 0, W, H)
+            pos   = normalize_points(entry.get("positive", [])[:num_pos_points], 1)
+            neg   = normalize_points(entry.get("negative", [])[:num_neg_points], 0)
             return {"boxes": boxes, "positive": pos, "negative": neg}
 
         multi_frame_results = []
