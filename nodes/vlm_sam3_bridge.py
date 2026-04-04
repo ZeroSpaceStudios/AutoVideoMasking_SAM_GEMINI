@@ -19,6 +19,15 @@ import json
 import io
 import numpy as np
 from PIL import Image
+from .prompts import (
+    DESCRIBE_IMAGE,
+    bbox_prompt, points_prompt, multi_bbox_prompt, bbox_and_points_prompt,
+    face_parts_bbox_prompt, face_precise_points_prompt,
+    face_region_stage1_prompt, face_region_stage2_prompt,
+    layer_discovery_prompt, layer_localize_prompt,
+    reference_match_prompt,
+    autocrop_discovery_prompt, autocrop_localize_prompt,
+)
 
 AVAILABLE_MODELS = ["gemini-3.1-pro-preview", "gemini-3-flash-preview"]
 DEFAULT_MODEL = AVAILABLE_MODELS[0]
@@ -232,10 +241,7 @@ class VLMImageTest:
     def run(self, image, api):
         pil_img = _tensor_to_pil(image)
         print(f"[VLMImageTest] Image size: {pil_img.size}, model: {api['model_name']}")
-        prompt = (
-            "Describe exactly what you see in this image. "
-            "List every object, their positions and colors."
-        )
+        prompt = DESCRIBE_IMAGE
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMImageTest] Response: {raw}")
         return (raw,)
@@ -274,14 +280,7 @@ class VLMtoBBox:
         if few_shot_examples.strip():
             few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() + "\n\nApply same quality to the new image."
 
-        prompt = (
-            f"Locate: {target_description}\n"
-            f"Image dimensions: {W}x{H} pixels.\n"
-            "Return ONLY valid JSON (no markdown):\n"
-            '{"bbox": [x1, y1, x2, y2], "label": "<short name>"}\n'
-            "Pixel coordinates, tight box, x1<x2, y1<y2."
-            + few_shot_block
-        )
+        prompt = bbox_prompt(target_description, W, H, few_shot_block)
 
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMtoBBox] Raw: {raw}")
@@ -340,14 +339,7 @@ class VLMtoPoints:
 
         size_note = "This image is cropped to the target." if (bbox_context and bbox_context.get("boxes")) else f"Image: {W}x{H} pixels."
 
-        prompt = (
-            f"Segment: {target_description}\n{size_note}\n"
-            f"Place {num_pos_points} positive point(s) ON the {target_description} — spread across, deep inside, never on edges.\n"
-            f"Place {num_neg_points} negative point(s) on anything NOT {target_description} — near boundary.\n"
-            "Return ONLY JSON:\n"
-            '{"positive": [[x, y], ...], "negative": [[x, y], ...]}'
-            + few_shot_block
-        )
+        prompt = points_prompt(target_description, size_note, num_pos_points, num_neg_points, few_shot_block)
 
         crop_x1, crop_y1, crop_w, crop_h = 0, 0, W, H
         send_img = pil_img
@@ -415,14 +407,7 @@ class VLMtoMultiBBox:
 
         few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() if few_shot_examples.strip() else ""
 
-        prompt = (
-            f"Detect: {target_description}\n"
-            f"Image: {W}x{H} px. Find up to {max_objects} instances.\n"
-            "Return ONLY JSON:\n"
-            '{"objects": [{"bbox": [x1,y1,x2,y2], "label": "name"}, ...]}\n'
-            "Pixel coords, tight boxes, sorted by confidence."
-            + few_shot_block
-        )
+        prompt = multi_bbox_prompt(target_description, W, H, max_objects, few_shot_block)
 
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMtoMultiBBox] Raw: {raw}")
@@ -485,15 +470,7 @@ class VLMtoBBoxAndPoints:
 
         few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() if few_shot_examples.strip() else ""
 
-        prompt = (
-            f"Segment: {target_description}\nImage: {W}x{H} pixels.\n\n"
-            "1. Tight bounding box around the target.\n"
-            f"2. {num_pos_points} positive point(s) ON the {target_description} — spread across, deep inside, never on edges.\n"
-            f"3. {num_neg_points} negative point(s) on anything NOT {target_description} — near boundary.\n\n"
-            "Return ONLY JSON:\n"
-            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}'
-            + few_shot_block
-        )
+        prompt = bbox_and_points_prompt(target_description, W, H, num_pos_points, num_neg_points, few_shot_block)
 
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMtoBBoxAndPoints] Raw: {raw}")
@@ -580,16 +557,7 @@ class VLMPromptEditor:
         pil_img = _tensor_to_pil(image)
         W, H = pil_img.size
 
-        auto_prompt = (
-            f"Segment: {target_description}\nImage: {W}x{H} pixels.\n\n"
-            "1. Tight bounding box around the target.\n"
-            f"2. {num_pos_points} positive point(s) ON the {target_description}"
-            " — spread across, deep inside, never on edges.\n"
-            f"3. {num_neg_points} negative point(s) on anything NOT {target_description}"
-            " — near boundary.\n\n"
-            "Return ONLY JSON:\n"
-            '{"bbox": [x1, y1, x2, y2], "positive": [[x, y], ...], "negative": [[x, y], ...]}'
-        )
+        auto_prompt = bbox_and_points_prompt(target_description, W, H, num_pos_points, num_neg_points)
 
         final_prompt = override_prompt.strip() if override_prompt.strip() else auto_prompt
         mode = "OVERRIDE" if override_prompt.strip() else "AUTO"
@@ -1028,18 +996,7 @@ class VLMFacePartsBBox:
 
         cW, cH = pil_img.size
         parts_desc = "\n".join(f'  "{k}": {v}' for k, v in FACE_PART_PROMPTS.items())
-        prompt = (
-            f"Image: {cW}x{cH} px (cropped to person).\n"
-            "Return tight bounding boxes for each region (pixel coords in cropped image).\n\n"
-            "Regions:\n" + parts_desc + "\n\n"
-            "Return ONLY JSON:\n{\n"
-            '  "hair":      {"bbox": [x1,y1,x2,y2], "confidence": 0.0-1.0},\n'
-            '  "face":      {"bbox": [x1,y1,x2,y2], "confidence": 0.0-1.0},\n'
-            '  "neck":      {"bbox": [x1,y1,x2,y2], "confidence": 0.0-1.0},\n'
-            '  "face_neck": {"bbox": [x1,y1,x2,y2], "confidence": 0.0-1.0},\n'
-            '  "clothing":  {"bbox": [x1,y1,x2,y2], "confidence": 0.0-1.0}\n}\n'
-            "Rules: x1<x2 y1<y2, face+hair must NOT overlap, neck BELOW chin."
-        )
+        prompt = face_parts_bbox_prompt(cW, cH, parts_desc)
 
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMFacePartsBBox] Raw: {raw}")
@@ -1171,20 +1128,7 @@ class VLMFacePrecisePoints:
                 modifiers.append("Exclude ears — treat as background.")
         modifier_block = ("\n" + "\n".join(modifiers)) if modifiers else ""
 
-        prompt = (
-            f"Image: {cW}x{cH} px (cropped to face region).\n\n"
-            f"TARGET: {cfg['fg_desc']}{modifier_block}\n\n"
-            f"Place {num_fg_points} FOREGROUND points spread across these zones:\n"
-            f"  {cfg['fg_zones']}\n"
-            "  → Points must be deep inside the region, never on edges or boundaries.\n\n"
-            f"Place {num_bg_points} BACKGROUND points on: {cfg['bg_desc']}\n"
-            f"  Preferred zones: {cfg['bg_zones']}\n"
-            "  → Points should be close to but outside the target boundary.\n\n"
-            "Also return a tight bounding box around the target region.\n\n"
-            "Return ONLY JSON (pixel coordinates in this cropped image):\n"
-            '{"bbox": [x1, y1, x2, y2], "foreground": [[x, y], ...], "background": [[x, y], ...]}\n'
-            "Rules: x1<x2 y1<y2, spread points — do NOT cluster them."
-        )
+        prompt = face_precise_points_prompt(cW, cH, cfg, num_fg_points, num_bg_points, modifier_block)
 
         raw = _call_gemini(pil_img, prompt, api)
         print(f"[VLMFacePrecisePoints] target={face_target} crop={cW}x{cH} | raw: {raw}")
@@ -1312,14 +1256,7 @@ class VLMFaceRegion:
         sW, sH = search_img.size
 
         # ── Stage 1: detect region bbox ───────────────────────────────
-        prompt1 = (
-            f"Image: {sW}x{sH} px.\n"
-            f"TARGET: {region}\n\n"
-            + self._FACE_RULES +
-            "\nReturn ONLY JSON (pixel coords):\n"
-            '{"bbox": [x1, y1, x2, y2]}\n'
-            "Tight box. x1<x2 y1<y2."
-        )
+        prompt1 = face_region_stage1_prompt(sW, sH, region, self._FACE_RULES)
         raw1 = _call_gemini(search_img, prompt1, api)
         print(f"[VLMFaceRegion] Stage1: {raw1}")
 
@@ -1347,15 +1284,7 @@ class VLMFaceRegion:
         cW, cH = pil_crop.size
 
         # ── Stage 2: precise points on the crop ───────────────────────
-        prompt2 = (
-            f"Image: {cW}x{cH} px — cropped tightly to: {region}.\n"
-            f"TARGET: {region}\n\n"
-            + self._FACE_RULES +
-            f"\nPlace {num_fg_points} FOREGROUND points spread across the entire target.\n"
-            f"Place {num_bg_points} BACKGROUND points just outside the target boundary.\n\n"
-            "Return ONLY JSON (pixel coords in this cropped image):\n"
-            '{"foreground": [[x, y], ...], "background": [[x, y], ...]}'
-        )
+        prompt2 = face_region_stage2_prompt(cW, cH, region, self._FACE_RULES, num_fg_points, num_bg_points)
         raw2 = _call_gemini(pil_crop, prompt2, api)
         print(f"[VLMFaceRegion] Stage2: {raw2}")
 
@@ -1407,15 +1336,7 @@ def _run_discovery_and_localize(pil_img, api, layer_preset, guidance_line, W, H,
     """Run the two-stage Gemini pipeline (discovery → localize+points).
     Returns (layers, raw1, raw2); callers format their own raw string.
     """
-    discovery_prompt = (
-        (f"{guidance_line}\n\n" if guidance_line else "")
-        + "Look at the image and list every distinct visual layer or region you can clearly see. "
-        "Give each a SHORT, SPECIFIC label (e.g. 'black turtleneck', 'curly brown hair', 'gold hoop earrings'). "
-        "Max 8 layers. Skip anything not clearly visible.\n\n"
-        "Return ONLY valid JSON (no markdown):\n"
-        '{"layers": ["label1", "label2", ...]}'
-    )
-    raw1 = _call_gemini(pil_img, discovery_prompt, api)
+    raw1 = _call_gemini(pil_img, layer_discovery_prompt(guidance_line), api)
     print(f"[{log_prefix}] Discovery: {raw1}")
 
     try:
@@ -1428,23 +1349,7 @@ def _run_discovery_and_localize(pil_img, api, layer_preset, guidance_line, W, H,
         discovered = LAYER_PRESETS.get(layer_preset, LAYER_PRESETS["portrait"])
 
     labels_json = json.dumps(discovered, indent=2)
-    localize_prompt = (
-        f"Image: {W}x{H} pixels. All coordinates are pixel values in this image.\n\n"
-        f"For each region in the list below, return:\n"
-        f"  • A tight bounding box (x1,y1,x2,y2, pixel coords, x1<x2, y1<y2)\n"
-        f"  • {num_pos_points} positive points INSIDE the region "
-        f"(spread across, deep inside, never on edges)\n"
-        f"  • {num_neg_points} negative points OUTSIDE the region "
-        f"(just beyond its boundary)\n\n"
-        f"Regions:\n{labels_json}\n\n"
-        "Skip any region not clearly visible. Confidence 0.0-1.0, omit below 0.3.\n\n"
-        "Return ONLY valid JSON (no markdown):\n"
-        '{"layers": [\n'
-        '  {"label": "<exact label>", "bbox": [x1,y1,x2,y2], "confidence": 0.9,\n'
-        '   "positive": [[x,y],...], "negative": [[x,y],...]},\n'
-        "  ...\n]}"
-    )
-    raw2 = _call_gemini(pil_img, localize_prompt, api)
+    raw2 = _call_gemini(pil_img, layer_localize_prompt(W, H, num_pos_points, num_neg_points, labels_json), api)
     print(f"[{log_prefix}] Localize+Points: {raw2}")
 
     try:
@@ -1848,16 +1753,7 @@ class VLMReferenceMatch:
         tgt_pil = _tensor_to_pil(target_frame)
         W, H = tgt_pil.size
 
-        prompt = (
-            f"LEFT image: reference showing {subject_description}.\n"
-            f"RIGHT image: target frame, {W}x{H} pixels.\n\n"
-            f"Find {subject_description} from the LEFT image in the RIGHT image. "
-            "Return a tight bounding box in the RIGHT image coordinate space.\n\n"
-            "Return ONLY valid JSON (no markdown):\n"
-            '{"bbox": [x1, y1, x2, y2], "confidence": 0.0-1.0}\n'
-            "Pixel coordinates of the RIGHT image only. x1<x2, y1<y2. "
-            'If the subject is not found, return {"bbox": null, "confidence": 0.0}.'
-        )
+        prompt = reference_match_prompt(subject_description, W, H)
 
         client = genai.Client(api_key=api["api_key"])
         buf_ref = _io.BytesIO(); ref_pil.save(buf_ref, format="PNG")
@@ -2140,16 +2036,7 @@ class VLMAutoCrop:
 
         # ── Call 1: Presence / Discovery ─────────────────────────────────
         hint_line = f"Focus on: {focus_hint.strip()}\n\n" if focus_hint.strip() else ""
-        discovery_prompt = (
-            f"{hint_line}"
-            "Look at this image and list every distinct visual region you can clearly see. "
-            "Give each a SHORT, SPECIFIC label (e.g. 'red jacket', 'person face', 'wooden table'). "
-            f"Return at most {max_regions} regions. Skip anything not clearly visible.\n\n"
-            "Return ONLY valid JSON (no markdown):\n"
-            '{"regions": ["label1", "label2", ...]}'
-        )
-
-        raw1 = _call_gemini(pil_img, discovery_prompt, api)
+        raw1 = _call_gemini(pil_img, autocrop_discovery_prompt(hint_line, max_regions), api)
         print(f"[VLMAutoCrop] Discovery: {raw1}")
 
         try:
@@ -2167,18 +2054,7 @@ class VLMAutoCrop:
 
         # ── Call 2: Localization ──────────────────────────────────────────
         labels_json = json.dumps(discovered[:max_regions], indent=2)
-        localize_prompt = (
-            f"Image: {W}x{H} pixels.\n\n"
-            f"Return a tight bounding box for each of these regions:\n{labels_json}\n\n"
-            "Pixel coordinates, x1<x2, y1<y2. Skip any region not visible. "
-            "Confidence 0.0-1.0. Omit entries below 0.3.\n\n"
-            "Return ONLY valid JSON (no markdown):\n"
-            '{"regions": [\n'
-            '  {"label": "<exact label from list>", "bbox": [x1, y1, x2, y2], "confidence": 0.9},\n'
-            "  ...\n]}"
-        )
-
-        raw2 = _call_gemini(pil_img, localize_prompt, api)
+        raw2 = _call_gemini(pil_img, autocrop_localize_prompt(W, H, labels_json), api)
         print(f"[VLMAutoCrop] Localization: {raw2}")
         raw = f"=== Discovery ===\n{raw1}\n\n=== Localization ===\n{raw2}"
 
