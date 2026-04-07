@@ -631,8 +631,8 @@
         "widget_ue_connectable": {}
       },
       "widgets_values": [
-        "auto",
-        "auto"
+        "models/sam3/sam3.pt",
+        ""
       ]
     },
     {
