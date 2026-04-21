@@ -123,6 +123,8 @@ def _parse_json(text: str) -> dict:
 def _maybe_normalize_corners(x1, y1, x2, y2, W, H):
     # Gemini returns 0-1000 normalized scale, not pixel coords.
     # If any value > 2.0 assume 0-1000 scale and divide by 1000.
+    # Note: values may slightly overshoot 1000 (e.g., 1071 when subject reaches
+    # image edge); clamp is applied downstream, don't switch to pixel path here.
     if any(v > 2.0 for v in [x1, y1, x2, y2]):
         return x1/1000, y1/1000, x2/1000, y2/1000
     return x1, y1, x2, y2
@@ -144,6 +146,24 @@ def normalize_points_crop_to_full(pts_raw, label_val, crop_w, crop_h, crop_x1, c
         abs_x = (pt[0] / 1000 * crop_w + crop_x1) if pt[0] > 1.5 else (pt[0] * crop_w + crop_x1)
         abs_y = (pt[1] / 1000 * crop_h + crop_y1) if pt[1] > 1.5 else (pt[1] * crop_h + crop_y1)
         result.append([max(0.0, min(1.0, abs_x / full_W)), max(0.0, min(1.0, abs_y / full_H))])
+        lbls.append(label_val)
+    return {"points": result, "labels": lbls}
+
+
+def normalize_points_auto(pts_raw, label_val):
+    """Point normalizer for Gemini 0-1000 scale output.
+
+    Gemini's grounding tokens are 0-1000 scale; values may slightly overshoot
+    1000 when points are near image edges. Dividing by 1000 keeps overshoot
+    handling cheap: the clamp to [0,1] absorbs any excess.
+    Values <= 1.5 are treated as already 0-1 normalized.
+    """
+    result, lbls = [], []
+    for pt in pts_raw:
+        x, y = pt[0], pt[1]
+        nx = x / 1000.0 if x > 1.5 else x
+        ny = y / 1000.0 if y > 1.5 else y
+        result.append([max(0.0, min(1.0, nx)), max(0.0, min(1.0, ny))])
         lbls.append(label_val)
     return {"points": result, "labels": lbls}
 
@@ -1092,11 +1112,24 @@ class VLMFacePartsBBox:
             if float(entry.get("confidence", 1.0)) < score_threshold:
                 return empty
             x1, y1, x2, y2 = entry["bbox"]
-            x1 = max(0, x1-padding_px); y1 = max(0, y1-padding_px)
-            x2 = min(cW, x2+padding_px); y2 = min(cH, y2+padding_px)
-            ax1=(x1+crop_x1)/W; ay1=(y1+crop_y1)/H
-            ax2=(x2+crop_x1)/W; ay2=(y2+crop_y1)/H
-            cx=(ax1+ax2)/2; cy=(ay1+ay2)/2
+            # Normalize Gemini's coord scale (typically 0-1000) to [0,1] relative to crop
+            x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, cW, cH)
+            # Sort corners defensively (Gemini occasionally swaps)
+            if x1n > x2n: x1n, x2n = x2n, x1n
+            if y1n > y2n: y1n, y2n = y2n, y1n
+            # Convert to crop-space pixels so padding_px makes sense
+            x1p = x1n * cW; y1p = y1n * cH
+            x2p = x2n * cW; y2p = y2n * cH
+            # Apply padding in pixel space
+            x1p = max(0, x1p - padding_px); y1p = max(0, y1p - padding_px)
+            x2p = min(cW, x2p + padding_px); y2p = min(cH, y2p + padding_px)
+            # Guard against degenerate box after clamp
+            if x2p <= x1p or y2p <= y1p:
+                return empty
+            # Map to full-frame normalized [0,1]
+            ax1 = (x1p + crop_x1) / W; ay1 = (y1p + crop_y1) / H
+            ax2 = (x2p + crop_x1) / W; ay2 = (y2p + crop_y1) / H
+            cx = (ax1 + ax2) / 2; cy = (ay1 + ay2) / 2
             return {"boxes": [[cx, cy, ax2-ax1, ay2-ay1]], "labels": [True]}
 
         return (_to_box("hair"), _to_box("face"), _to_box("neck"), _to_box("face_neck"), _to_box("clothing"), raw)
@@ -1296,6 +1329,18 @@ class VLMFaceRegion:
                 "num_fg_points": ("INT", {"default": 8, "min": 4, "max": 16}),
                 "num_bg_points": ("INT", {"default": 4, "min": 0, "max": 8}),
                 "crop_padding":  ("INT", {"default": 24, "min": 0, "max": 80}),
+                "output_space":  (["crop", "full_frame"], {
+                    "default": "crop",
+                    "tooltip": (
+                        "crop (default): bbox+points emitted in crop-space — for "
+                        "static-image workflows where SAM3 runs on cropped_image "
+                        "and AVMPasteBackMask stitches the mask back to the full "
+                        "frame. full_frame: bbox+points emitted in full-image "
+                        "coords — correct for SAM3-Video tracking a moving subject "
+                        "across frames (wire SAM3 to the full video, not to "
+                        "cropped_image)."
+                    ),
+                }),
             },
             "optional": {
                 "person_bbox":   ("SAM3_BOXES_PROMPT",),
@@ -1312,7 +1357,7 @@ class VLMFaceRegion:
     CATEGORY      = "AVM/Face"
 
     def run(self, image, api, region, num_fg_points, num_bg_points,
-            crop_padding=24, person_bbox=None):
+            crop_padding=24, output_space="crop", person_bbox=None):
         import torch
         pil_full = _tensor_to_pil(image)
         W, H = pil_full.size
@@ -1341,18 +1386,31 @@ class VLMFaceRegion:
         except Exception as e:
             raise RuntimeError(f"[VLMFaceRegion] Stage1 failed to parse Gemini response: {e}\nRaw: {raw1}") from e
 
-        # Map to full-image pixel space
+        # Normalize Gemini coord scale to [0,1] (prompt requests 0-1000 scale;
+        # values may overshoot slightly, that's fine — clamp happens on crop).
         if any(v > 2.0 for v in [bx1, by1, bx2, by2]):
-            bx1 += search_x1;  by1 += search_y1
-            bx2 += search_x1;  by2 += search_y1
-        else:
-            bx1 = bx1 * sW + search_x1;  by1 = by1 * sH + search_y1
-            bx2 = bx2 * sW + search_x1;  by2 = by2 * sH + search_y1
+            bx1, by1 = bx1 / 1000.0, by1 / 1000.0
+            bx2, by2 = bx2 / 1000.0, by2 / 1000.0
+        # Map to full-image pixel space via search window
+        bx1 = bx1 * sW + search_x1
+        by1 = by1 * sH + search_y1
+        bx2 = bx2 * sW + search_x1
+        by2 = by2 * sH + search_y1
+        # Gemini occasionally swaps corners; ensure x1<x2, y1<y2
+        if bx1 > bx2:
+            bx1, bx2 = bx2, bx1
+        if by1 > by2:
+            by1, by2 = by2, by1
 
         cx1 = max(0, int(bx1) - crop_padding)
         cy1 = max(0, int(by1) - crop_padding)
         cx2 = min(W, int(bx2) + crop_padding)
         cy2 = min(H, int(by2) + crop_padding)
+        if cx2 <= cx1 or cy2 <= cy1:
+            raise RuntimeError(
+                f"[VLMFaceRegion] Invalid crop after Stage1 mapping: "
+                f"[{cx1},{cy1},{cx2},{cy2}] (search={sW}x{sH}, full={W}x{H}). Raw: {raw1}"
+            )
         crop_meta = {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2, "orig_w": W, "orig_h": H}
 
         cropped_tensor = image[:, cy1:cy2, cx1:cx2, :]
@@ -1374,14 +1432,32 @@ class VLMFaceRegion:
         fg_raw = fg_raw[:num_fg_points]
         bg_raw = bg_raw[:num_bg_points]
 
-        # box_prompt covers the whole crop (SAM3 works on cropped_image)
-        box_prompt   = {"box":   [0.5, 0.5, 1.0, 1.0], "label": True}
-        boxes_prompt = {"boxes": [[0.5, 0.5, 1.0, 1.0]], "labels": [True]}
+        if output_space == "full_frame":
+            # Full-frame bbox = tight Stage-1 target box (NOT the padded crop).
+            # SAM3 treats the box as a strong prior — feeding it padded-crop
+            # bounds would bleed the segmentation into the padding zone.
+            tx1 = max(0.0, min(float(W), bx1))
+            ty1 = max(0.0, min(float(H), by1))
+            tx2 = max(0.0, min(float(W), bx2))
+            ty2 = max(0.0, min(float(H), by2))
+            bcx = (tx1 + tx2) / 2.0 / W
+            bcy = (ty1 + ty2) / 2.0 / H
+            bbw = (tx2 - tx1) / W
+            bbh = (ty2 - ty1) / H
+            box_prompt   = {"box":   [bcx, bcy, bbw, bbh], "label": True}
+            boxes_prompt = {"boxes": [[bcx, bcy, bbw, bbh]], "labels": [True]}
+            # Points from Stage 2 are in crop-space — project to full-frame [0,1]
+            positive_points = normalize_points_crop_to_full(fg_raw, 1, cW, cH, cx1, cy1, W, H)
+            negative_points = normalize_points_crop_to_full(bg_raw, 0, cW, cH, cx1, cy1, W, H)
+        else:
+            # Legacy crop-space output: box covers the whole crop, points in crop coords.
+            # Use when SAM3 runs on cropped_image and AVMPasteBackMask stitches back.
+            box_prompt   = {"box":   [0.5, 0.5, 1.0, 1.0], "label": True}
+            boxes_prompt = {"boxes": [[0.5, 0.5, 1.0, 1.0]], "labels": [True]}
+            positive_points = normalize_points_auto(fg_raw, 1)
+            negative_points = normalize_points_auto(bg_raw, 0)
 
-        positive_points = normalize_points(fg_raw, 1, W=cW, H=cH)
-        negative_points = normalize_points(bg_raw, 0, W=cW, H=cH)
-
-        print(f"[VLMFaceRegion] crop=[{cx1},{cy1},{cx2},{cy2}] "
+        print(f"[VLMFaceRegion] output_space={output_space} crop=[{cx1},{cy1},{cx2},{cy2}] "
               f"fg:{len(positive_points['points'])} bg:{len(negative_points['points'])}")
 
         raw_combined = f"=== Stage1 (bbox) ===\n{raw1}\n=== Stage2 (points) ===\n{raw2}"
