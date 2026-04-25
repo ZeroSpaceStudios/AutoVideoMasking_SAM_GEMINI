@@ -1890,6 +1890,74 @@ class AVMMultiFrameLayerPropagate:
 
 
 # =============================================================================
+# AVMLayerPreviewComposite — all layers overlaid on one frame for quick review
+# =============================================================================
+
+class AVMLayerPreviewComposite:
+    """Renders ALL detected layers simultaneously on a single frame (default: frame 0).
+    Each layer gets a distinct colour. Outputs one IMAGE + label list so you can
+    see every layer at a glance and then type which ones to pass to AVMMaskCombine."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_frames": ("IMAGE",),
+                "layer_set":    ("AVM_LAYER_SET",),
+            },
+            "optional": {
+                "frame_idx":      ("INT",   {"default": 0, "min": 0, "tooltip": "Which frame to use as the base image."}),
+                "overlay_alpha":  ("FLOAT", {"default": 0.55, "min": 0.1, "max": 1.0, "step": 0.05}),
+                "mask_threshold": ("FLOAT", {"default": 0.5,  "min": 0.1, "max": 0.9, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES  = ("IMAGE", "STRING")
+    RETURN_NAMES  = ("composite_preview", "label_list")
+    FUNCTION      = "run"
+    CATEGORY      = "AVM"
+
+    def run(self, video_frames, layer_set, frame_idx=0, overlay_alpha=0.55, mask_threshold=0.5):
+        import torch
+        import torch.nn.functional as F_fn
+
+        F_count, H, W, C = video_frames.shape
+        frame_idx = min(frame_idx, F_count - 1)
+        base = video_frames[frame_idx, :, :, :3].float().clone()  # [H, W, 3]
+
+        renderable = [
+            (label, val) for label, val in layer_set.items()
+            if val is not None
+            and isinstance(val, dict)
+            and any(isinstance(k, int) for k in val)
+        ][:8]
+
+        label_lines = []
+        for i, (label, video_masks) in enumerate(renderable):
+            r, g, b = LAYER_COLORS[i % len(LAYER_COLORS)]
+            color_t = torch.tensor([r / 255.0, g / 255.0, b / 255.0], dtype=torch.float32)
+
+            masks = _extract_mask_from_video_masks(video_masks)  # [F_m, H_m, W_m]
+            if masks.shape[1] != H or masks.shape[2] != W:
+                masks = F_fn.interpolate(
+                    masks.unsqueeze(1).float(), size=(H, W),
+                    mode="bilinear", align_corners=False
+                ).squeeze(1)
+
+            fi = min(frame_idx, masks.shape[0] - 1)
+            mask_frame = masks[fi]  # [H, W]
+            binary = (mask_frame > mask_threshold).unsqueeze(-1).float()  # [H, W, 1]
+
+            base = base * (1.0 - binary * overlay_alpha) + color_t.expand(H, W, 3) * (binary * overlay_alpha)
+            label_lines.append(f"{i + 1}. {label}")
+
+        composite = base.clamp(0.0, 1.0).unsqueeze(0)  # [1, H, W, 3]
+        label_list = "\n".join(label_lines) if label_lines else "(no layers)"
+        print(f"[AVMLayerPreviewComposite] Composited {len(renderable)} layers on frame {frame_idx}")
+        return (composite, label_list)
+
+
+# =============================================================================
 # AVMLayerPreviewGrid — per-layer mask overlay videos for interactive selection
 # =============================================================================
 
@@ -2494,6 +2562,7 @@ NODE_CLASS_MAPPINGS = {
     "AVMMultiFrameAutoLayer":          AVMMultiFrameAutoLayer,
     "AVMLayerPropagate":               AVMLayerPropagate,
     "AVMMultiFrameLayerPropagate":     AVMMultiFrameLayerPropagate,
+    "AVMLayerPreviewComposite":         AVMLayerPreviewComposite,
     "AVMLayerPreviewGrid":             AVMLayerPreviewGrid,
     "AVMMaskCombine":                  AVMMaskCombine,
     "VLMReferenceMatch":               VLMReferenceMatch,
@@ -2523,6 +2592,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AVMMultiFrameAutoLayer":          "AVM Multi-Frame Layer Detect",
     "AVMLayerPropagate":               "AVM Layer Propagate",
     "AVMMultiFrameLayerPropagate":     "AVM Multi-Frame Layer Propagate",
+    "AVMLayerPreviewComposite":         "AVM Layer Preview Composite",
     "AVMLayerPreviewGrid":             "AVM Layer Preview Grid",
     "AVMMaskCombine":                  "AVM Mask Combine",
     "VLMReferenceMatch":               "AVM Reference Match",
