@@ -308,20 +308,37 @@ def _find_sam3_nodes_dir() -> str:
 
 def _load_sam3_modules():
     """Load video_state and sam3_video_nodes from ComfyUI-SAM3. Returns (vs_mod, vn_mod)."""
-    import importlib.util, os as _os
+    import importlib.util, sys, os as _os
 
     sam3_dir = _find_sam3_nodes_dir()
+    pkg = "_avm_sam3_pkg"
 
     def _load(fname):
+        modname = f"{pkg}.{fname[:-3]}"
+        if modname in sys.modules:
+            return sys.modules[modname]
         path = _os.path.join(sam3_dir, fname)
         if not _os.path.exists(path):
             raise ImportError(f"[AVM] {fname} not found in SAM3 nodes dir: {sam3_dir}")
-        spec = importlib.util.spec_from_file_location(f"_avm_sam3_{fname[:-3]}", path)
+        spec = importlib.util.spec_from_file_location(modname, path,
+            submodule_search_locations=[sam3_dir])
         mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = pkg
+        sys.modules[modname] = mod
         spec.loader.exec_module(mod)
         return mod
 
-    return _load("video_state.py"), _load("sam3_video_nodes.py")
+    # Ensure the package stub exists so relative imports resolve
+    if pkg not in sys.modules:
+        import types
+        pkg_mod = types.ModuleType(pkg)
+        pkg_mod.__path__ = [sam3_dir]
+        pkg_mod.__package__ = pkg
+        sys.modules[pkg] = pkg_mod
+
+    vs_mod = _load("video_state.py")
+    vn_mod = _load("sam3_video_nodes.py")
+    return vs_mod, vn_mod
 
 
 # =============================================================================
