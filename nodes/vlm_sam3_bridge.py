@@ -1691,7 +1691,6 @@ class AVMLayerPropagate:
         VideoPrompt = vs_mod.VideoPrompt
         SAM3Propagate = vn_mod.SAM3Propagate
 
-        propagator = SAM3Propagate()
         propagated = {}
 
         for label, boxes_prompt in layer_set.items():
@@ -1706,8 +1705,8 @@ class AVMLayerPropagate:
                 box_corners = [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2]
                 prompt = VideoPrompt.create_box(frame_idx, 1, box_corners, is_positive=True)
                 video_state = video_state.with_prompt(prompt)
-                result = propagator.propagate(sam3_model, video_state)
-                propagated[label] = result[0]  # SAM3_VIDEO_MASKS
+                result = SAM3Propagate.execute(sam3_model, video_state.to_dict())
+                propagated[label] = result[0]  # SAM3_VIDEO_MASKS (string-keyed dict)
                 print(f"[AVMLayerPropagate] '{label}' propagation complete")
             except Exception as e:
                 import traceback
@@ -1863,15 +1862,14 @@ class AVMMultiFrameLayerPropagate:
     def run(self, video_frames, multi_frame_layer_set, sam3_model):
         vs_mod, vn_mod = _load_sam3_modules()
         create_video_state = vs_mod.create_video_state
-        VideoPrompt       = vs_mod.VideoPrompt
-        SAM3Propagate     = vn_mod.SAM3Propagate
+        VideoPrompt        = vs_mod.VideoPrompt
+        SAM3Propagate      = vn_mod.SAM3Propagate
 
         # Collect all unique labels across all keyframes
         all_labels = set()
         for frame_data in multi_frame_layer_set:
             all_labels.update(frame_data["layer_set"].keys())
 
-        propagator = SAM3Propagate()
         propagated = {}
 
         for label in all_labels:
@@ -1896,8 +1894,8 @@ class AVMMultiFrameLayerPropagate:
                 for frame_idx, box_corners in anchors:
                     prompt = VideoPrompt.create_box(frame_idx, 1, box_corners, is_positive=True)
                     video_state = video_state.with_prompt(prompt)
-                result = propagator.propagate(sam3_model, video_state)
-                propagated[label] = result[0]
+                result = SAM3Propagate.execute(sam3_model, video_state.to_dict())
+                propagated[label] = result[0]  # SAM3_VIDEO_MASKS (string-keyed dict)
                 print(f"[AVMMultiFrameLayerPropagate] '{label}' done")
             except Exception as e:
                 import traceback
@@ -2246,9 +2244,13 @@ class VLMReferenceMatch:
 # =============================================================================
 
 def _extract_mask_from_video_masks(video_masks):
-    """Convert SAM3_VIDEO_MASKS {frame_idx: {"mask": [N,H,W]} | tensor} → MASK [F,H,W]."""
+    """Convert SAM3_VIDEO_MASKS → MASK [F,H,W].
+    SAM3 returns string keys after IPC ('0','1',...); also handles legacy int keys."""
     import torch
-    frame_indices = sorted(k for k in video_masks if isinstance(k, int))
+    # Accept both int and string-encoded int keys
+    frame_indices = sorted(
+        int(k) for k in video_masks if str(k).lstrip('-').isdigit()
+    )
     if not frame_indices:
         return torch.zeros(1, 8, 8)
 
@@ -2256,7 +2258,7 @@ def _extract_mask_from_video_masks(video_masks):
     ref_h, ref_w = None, None
 
     for idx in frame_indices:
-        data = video_masks[idx]
+        data = video_masks.get(idx) if idx in video_masks else video_masks.get(str(idx))
         m = data.get("mask") if isinstance(data, dict) else data
 
         if m is None:
@@ -2264,9 +2266,8 @@ def _extract_mask_from_video_masks(video_masks):
             frame_tensors.append(torch.zeros(h, w))
             continue
 
-        # m: [N, H, W] or [H, W]
-        if m.dim() == 3:
-            m = m[0]  # first object (obj_id=1 → index 0)
+        if hasattr(m, 'dim') and m.dim() == 3:
+            m = m[0]  # first object
 
         ref_h, ref_w = m.shape[-2], m.shape[-1]
         frame_tensors.append(m.float())
