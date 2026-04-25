@@ -30,6 +30,17 @@ from .prompts import (
 )
 
 GEMINI_MODELS = ["gemini-3.1-pro-preview", "gemini-3-flash-preview"]
+
+LAYER_COLORS = [
+    (255, 100, 100),  # red
+    (100, 220, 100),  # green
+    (100, 150, 255),  # blue
+    (255, 210,  60),  # yellow
+    (200,  90, 255),  # purple
+    ( 60, 215, 215),  # cyan
+    (255, 155,  50),  # orange
+    (150, 255, 110),  # lime
+]
 OPENROUTER_MODELS = [
     "google/gemini-3.1-pro-preview",
     "google/gemini-3-flash-preview",
@@ -1879,6 +1890,208 @@ class AVMMultiFrameLayerPropagate:
 
 
 # =============================================================================
+# AVMLayerPreviewGrid — per-layer mask overlay videos for interactive selection
+# =============================================================================
+
+class AVMLayerPreviewGrid:
+    """
+    Takes a propagated AVM_LAYER_SET and the original video frames.
+    Outputs one preview IMAGE per layer (up to 8): the original frame with
+    that layer's mask as a coloured semi-transparent highlight.
+
+    Wire each output to VHS_VideoCombine to save individual preview clips.
+    In the Modal web UI each clip plays next to a checkbox so the user
+    can pick which layers to combine before running AVMMaskCombine.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_frames": ("IMAGE",),
+                "layer_set":    ("AVM_LAYER_SET",),
+            },
+            "optional": {
+                "overlay_alpha":  ("FLOAT", {"default": 0.55, "min": 0.1, "max": 1.0, "step": 0.05,
+                                   "tooltip": "Opacity of the colour overlay on masked pixels."}),
+                "mask_threshold": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 0.9, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = (
+        "IMAGE", "IMAGE", "IMAGE", "IMAGE",
+        "IMAGE", "IMAGE", "IMAGE", "IMAGE",
+        "STRING", "STRING", "STRING", "STRING",
+        "STRING", "STRING", "STRING", "STRING",
+        "STRING",
+    )
+    RETURN_NAMES = (
+        "layer_1", "layer_2", "layer_3", "layer_4",
+        "layer_5", "layer_6", "layer_7", "layer_8",
+        "label_1", "label_2", "label_3", "label_4",
+        "label_5", "label_6", "label_7", "label_8",
+        "label_list",
+    )
+    FUNCTION = "run"
+    CATEGORY = "AVM"
+
+    def run(self, video_frames, layer_set, overlay_alpha=0.55, mask_threshold=0.5):
+        import torch
+        import torch.nn.functional as F_fn
+
+        F_count, H, W, C = video_frames.shape
+
+        # Only layers with propagated video masks (int-keyed dicts from SAM3Propagate)
+        renderable = [
+            (label, val) for label, val in layer_set.items()
+            if val is not None
+            and isinstance(val, dict)
+            and any(isinstance(k, int) for k in val)
+        ][:8]
+
+        empty_video = torch.zeros(F_count, H, W, 3)
+        layer_videos, layer_labels = [], []
+
+        for i, (label, video_masks) in enumerate(renderable):
+            r, g, b = LAYER_COLORS[i % len(LAYER_COLORS)]
+            color_t = torch.tensor([r / 255.0, g / 255.0, b / 255.0], dtype=torch.float32)
+
+            masks = _extract_mask_from_video_masks(video_masks)  # [F_m, H_m, W_m]
+
+            # Resize to video dimensions if SAM3 ran at a different resolution
+            if masks.shape[1] != H or masks.shape[2] != W:
+                masks = F_fn.interpolate(
+                    masks.unsqueeze(1).float(), size=(H, W),
+                    mode="bilinear", align_corners=False,
+                ).squeeze(1)
+
+            # Extend or trim to match video frame count
+            F_m = masks.shape[0]
+            if F_m < F_count:
+                pad = masks[-1:].expand(F_count - F_m, H, W)
+                masks = torch.cat([masks, pad], dim=0)
+            elif F_m > F_count:
+                masks = masks[:F_count]
+
+            # Blend: original * (1 - alpha*mask) + color * (alpha*mask)
+            frames_rgb = video_frames[:, :, :, :3].float()
+            binary = (masks > mask_threshold).unsqueeze(-1).float()  # [F, H, W, 1]
+            colored = color_t.expand(F_count, H, W, 3)
+            out = frames_rgb * (1.0 - binary * overlay_alpha) + colored * (binary * overlay_alpha)
+            out = out.clamp(0.0, 1.0)
+
+            layer_videos.append(out)
+            layer_labels.append(label)
+
+        while len(layer_videos) < 8:
+            layer_videos.append(empty_video)
+            layer_labels.append("")
+
+        label_list = "\n".join(f"{i+1}. {lb}" for i, lb in enumerate(layer_labels) if lb)
+        print(f"[AVMLayerPreviewGrid] Rendered {len(renderable)} layers: {[l for l, _ in renderable]}")
+        return (*layer_videos, *layer_labels, label_list)
+
+
+# =============================================================================
+# AVMMaskCombine — OR-merge selected layers into one mask
+# =============================================================================
+
+class AVMMaskCombine:
+    """
+    Combines selected layers from a propagated AVM_LAYER_SET into a single
+    MASK using per-frame OR (maximum).
+
+    Layer names are fuzzy-matched (case-insensitive substring) so
+    "hair, face" works even if the discovered label is "hair (scalp)".
+
+    In the Vast.ai test workflow wire selected_layers to a text primitive.
+    In the Modal app the GUI sends the user's checkbox selection here.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "layer_set":       ("AVM_LAYER_SET",),
+                "selected_layers": ("STRING", {
+                    "default": "hair, face",
+                    "multiline": False,
+                    "tooltip": "Comma-separated layer names to combine. Fuzzy-matched.",
+                }),
+            },
+            "optional": {
+                "mask_threshold": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 0.9, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES  = ("MASK", "STRING", "STRING")
+    RETURN_NAMES  = ("combined_mask", "matched_layers", "available_layers")
+    FUNCTION = "run"
+    CATEGORY = "AVM"
+
+    def run(self, layer_set, selected_layers, mask_threshold=0.5):
+        import torch
+
+        available_str = ", ".join(layer_set.keys())
+        names = [n.strip() for n in selected_layers.replace("\n", ",").split(",") if n.strip()]
+
+        matched_keys, masks_to_combine = [], []
+
+        for name in names:
+            key = None
+            if name in layer_set:
+                key = name
+            else:
+                needle = name.lower()
+                for k in layer_set:
+                    if needle in k.lower() or k.lower() in needle:
+                        key = k
+                        break
+
+            if key is None:
+                print(f"[AVMMaskCombine] '{name}' not found. Available: {available_str}")
+                continue
+
+            value = layer_set[key]
+            if value is None:
+                print(f"[AVMMaskCombine] '{key}' has no data")
+                continue
+
+            if not (isinstance(value, dict) and any(isinstance(k, int) for k in value)):
+                print(f"[AVMMaskCombine] '{key}' is not a propagated mask — run LayerPropagate first")
+                continue
+
+            try:
+                mask = _extract_mask_from_video_masks(value)  # [F, H, W]
+                masks_to_combine.append(mask)
+                matched_keys.append(key)
+                print(f"[AVMMaskCombine] Added '{key}': {mask.shape}")
+            except Exception as e:
+                print(f"[AVMMaskCombine] '{key}' extraction failed: {e}")
+
+        matched_str = ", ".join(matched_keys)
+
+        if not masks_to_combine:
+            print(f"[AVMMaskCombine] Nothing to combine. Available: {available_str}")
+            return (torch.zeros(1, 8, 8), matched_str, available_str)
+
+        # Align to longest frame count, then OR
+        max_F = max(m.shape[0] for m in masks_to_combine)
+        H, W = masks_to_combine[0].shape[1], masks_to_combine[0].shape[2]
+        combined = torch.zeros(max_F, H, W)
+
+        for mask in masks_to_combine:
+            F_m = mask.shape[0]
+            if F_m < max_F:
+                mask = torch.cat([mask, mask[-1:].expand(max_F - F_m, H, W)], dim=0)
+            combined = torch.max(combined, mask)
+
+        combined = (combined > mask_threshold).float()
+        print(f"[AVMMaskCombine] [{matched_str}] → {combined.shape}")
+        return (combined, matched_str, available_str)
+
+
+# =============================================================================
 # VLMReferenceMatch — find a subject from a reference image in a target frame
 # =============================================================================
 
@@ -2281,6 +2494,8 @@ NODE_CLASS_MAPPINGS = {
     "AVMMultiFrameAutoLayer":          AVMMultiFrameAutoLayer,
     "AVMLayerPropagate":               AVMLayerPropagate,
     "AVMMultiFrameLayerPropagate":     AVMMultiFrameLayerPropagate,
+    "AVMLayerPreviewGrid":             AVMLayerPreviewGrid,
+    "AVMMaskCombine":                  AVMMaskCombine,
     "VLMReferenceMatch":               VLMReferenceMatch,
     "AVMLayerSelector":                AVMLayerSelector,
     "VLMPromptEditor":                 VLMPromptEditor,
@@ -2308,6 +2523,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AVMMultiFrameAutoLayer":          "AVM Multi-Frame Layer Detect",
     "AVMLayerPropagate":               "AVM Layer Propagate",
     "AVMMultiFrameLayerPropagate":     "AVM Multi-Frame Layer Propagate",
+    "AVMLayerPreviewGrid":             "AVM Layer Preview Grid",
+    "AVMMaskCombine":                  "AVM Mask Combine",
     "VLMReferenceMatch":               "AVM Reference Match",
     "AVMLayerSelector":                "AVM Layer Selector",
     "VLMPromptEditor":                 "AVM Prompt Editor",
