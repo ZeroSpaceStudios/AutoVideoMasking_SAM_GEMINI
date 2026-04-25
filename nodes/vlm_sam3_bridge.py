@@ -1925,6 +1925,12 @@ class AVMLayerPreviewComposite:
         frame_idx = min(frame_idx, F_count - 1)
         base = video_frames[frame_idx, :, :, :3].float().clone()  # [H, W, 3]
 
+        # Debug: log what's actually in the layer_set
+        for k, v in layer_set.items():
+            t = type(v).__name__
+            keys = list(v.keys())[:5] if isinstance(v, dict) else "n/a"
+            print(f"[AVMLayerPreviewComposite] layer '{k}': type={t}, keys={keys}")
+
         renderable = [
             (label, val) for label, val in layer_set.items()
             if val is not None
