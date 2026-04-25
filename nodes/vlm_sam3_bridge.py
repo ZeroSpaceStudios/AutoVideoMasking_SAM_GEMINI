@@ -1539,6 +1539,13 @@ def _run_discovery_and_localize(pil_img, api, layer_preset, guidance_line, W, H,
         print(f"[{log_prefix}] Localize parse error: {e}")
         layers = []
 
+    # Gemini may return layers in a different order than `discovered`.
+    # Re-sort to match discovery order so layer_1 == first discovered label.
+    if layers and discovered:
+        disc_order = {lbl.strip(): i for i, lbl in enumerate(discovered)}
+        layers.sort(key=lambda x: disc_order.get(x.get("label", "").strip(), 999))
+        print(f"[{log_prefix}] Layer order after sort: {[x.get('label') for x in layers]}")
+
     return layers, raw1, raw2
 
 
