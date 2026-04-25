@@ -1677,6 +1677,12 @@ class AVMLayerPropagate:
                     "default": 0, "min": 0,
                     "tooltip": "Frame index the layer boxes were detected on.",
                 }),
+            },
+            "optional": {
+                "video_state": ("SAM3_VIDEO_STATE", {
+                    "tooltip": "Pre-built video state from SAM3 Video Segmentation. "
+                               "If provided, reuses its saved frames instead of re-saving them.",
+                }),
             }
         }
 
@@ -1685,11 +1691,20 @@ class AVMLayerPropagate:
     FUNCTION = "run"
     CATEGORY      = "AVM"
 
-    def run(self, video_frames, layer_set, sam3_model, frame_idx):
+    def run(self, video_frames, layer_set, sam3_model, frame_idx, video_state=None):
         vs_mod, vn_mod = _load_sam3_modules()
         create_video_state = vs_mod.create_video_state
-        VideoPrompt = vs_mod.VideoPrompt
-        SAM3Propagate = vn_mod.SAM3Propagate
+        SAM3VideoState     = vs_mod.SAM3VideoState
+        VideoPrompt        = vs_mod.VideoPrompt
+        SAM3Propagate      = vn_mod.SAM3Propagate
+
+        # Build a prompt-free base state once (reuse saved frames if video_state provided)
+        if video_state is not None:
+            clean_dict = dict(video_state)
+            clean_dict["prompts"] = []
+            _base_state = SAM3VideoState.from_dict(clean_dict)
+        else:
+            _base_state = create_video_state(video_frames)
 
         propagated = {}
 
@@ -1700,7 +1715,6 @@ class AVMLayerPropagate:
 
             print(f"[AVMLayerPropagate] Propagating layer: '{label}'")
             try:
-                video_state = create_video_state(video_frames)
                 _F, H, W, _C = video_frames.shape
                 cx, cy, bw, bh = boxes_prompt["boxes"][0]
                 box_corners = [
@@ -1709,7 +1723,7 @@ class AVMLayerPropagate:
                     (cx + bw / 2) * W,
                     (cy + bh / 2) * H,
                 ]
-                video_state = video_state.with_prompt(
+                layer_state = _base_state.with_prompt(
                     VideoPrompt.create_box(frame_idx, 1, box_corners, is_positive=True)
                 )
                 # Add positive + negative point prompts from Gemini localization
@@ -1720,10 +1734,10 @@ class AVMLayerPropagate:
                 if pos_pts or neg_pts:
                     all_pts = pos_pts + neg_pts
                     all_lbls = [1] * len(pos_pts) + [0] * len(neg_pts)
-                    video_state = video_state.with_prompt(
+                    layer_state = layer_state.with_prompt(
                         VideoPrompt.create_point(frame_idx, 1, all_pts, all_lbls)
                     )
-                result = SAM3Propagate.execute(sam3_model, video_state.to_dict())
+                result = SAM3Propagate.execute(sam3_model, layer_state.to_dict())
                 propagated[label] = result[0]  # SAM3_VIDEO_MASKS (string-keyed dict)
                 print(f"[AVMLayerPropagate] '{label}' propagation complete")
             except Exception as e:
