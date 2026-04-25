@@ -2244,9 +2244,10 @@ class VLMReferenceMatch:
 # =============================================================================
 
 def _extract_mask_from_video_masks(video_masks):
-    """Convert SAM3_VIDEO_MASKS → MASK [F,H,W].
-    SAM3 returns string keys after IPC ('0','1',...); also handles legacy int keys."""
+    """Convert SAM3_VIDEO_MASKS → float MASK tensor [F,H,W].
+    SAM3 returns string-keyed frames ('0','1',...) with numpy bool arrays (1,H,W)."""
     import torch
+    import numpy as np
     # Accept both int and string-encoded int keys
     frame_indices = sorted(
         int(k) for k in video_masks if str(k).lstrip('-').isdigit()
@@ -2266,11 +2267,18 @@ def _extract_mask_from_video_masks(video_masks):
             frame_tensors.append(torch.zeros(h, w))
             continue
 
-        if hasattr(m, 'dim') and m.dim() == 3:
-            m = m[0]  # first object
+        # Convert numpy → torch
+        if isinstance(m, np.ndarray):
+            m = torch.from_numpy(m.astype(np.float32))
+        else:
+            m = m.float()
+
+        # Squeeze [N,H,W] → [H,W]
+        if m.dim() == 3:
+            m = m[0]
 
         ref_h, ref_w = m.shape[-2], m.shape[-1]
-        frame_tensors.append(m.float())
+        frame_tensors.append(m)
 
     return torch.stack(frame_tensors, dim=0)  # [F, H, W]
 
