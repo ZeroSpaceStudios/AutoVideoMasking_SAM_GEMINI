@@ -2444,17 +2444,31 @@ class AVMLayerSelector:
 # =============================================================================
 
 class AVMAddFramePromptBundle:
+    """Add box + point prompts from a SAM3_BOX_AND_POINT bundle to a video state.
+
+    video_frames is optional: if provided AND video_state is not connected,
+    the node creates the video state from frames automatically.  This lets you
+    go  VHS_LoadVideo → AVMAddFramePromptBundle → SAM3 Propagate  without
+    needing a separate SAM3 Video Segmentation node.
+    """
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video_state":   ("SAM3_VIDEO_STATE",),
                 "box_and_point": ("SAM3_BOX_AND_POINT",),
-                "frame_idx":     ("INT", {"default": 15, "min": 0,
+                "frame_idx":     ("INT", {"default": 0, "min": 0,
                                   "tooltip": "Frame to anchor prompts on."}),
                 "obj_id":        ("INT", {"default": 1, "min": 1}),
-            }
+            },
+            "optional": {
+                "video_state":   ("SAM3_VIDEO_STATE", {
+                    "tooltip": "Existing video state. If not connected, video_frames must be provided.",
+                }),
+                "video_frames":  ("IMAGE", {
+                    "tooltip": "Video frames batch. Used to create a new video state when video_state is not connected.",
+                }),
+            },
         }
 
     RETURN_TYPES  = ("SAM3_VIDEO_STATE",)
@@ -2462,13 +2476,20 @@ class AVMAddFramePromptBundle:
     FUNCTION      = "run"
     CATEGORY      = "AVM"
 
-    def run(self, video_state, box_and_point, frame_idx, obj_id):
-        import importlib.util, os as _os
-        _base = _os.path.join(_find_sam3_nodes_dir(), "video_state.py")
-        _spec = importlib.util.spec_from_file_location("sam3_video_state", _base)
-        _mod  = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        VideoPrompt = _mod.VideoPrompt
+    def run(self, box_and_point, frame_idx, obj_id,
+            video_state=None, video_frames=None):
+        vs_mod, _ = _load_sam3_modules()
+        VideoPrompt       = vs_mod.VideoPrompt
+        create_video_state = vs_mod.create_video_state
+
+        # Create video state from frames if not provided
+        if video_state is None:
+            if video_frames is None:
+                raise ValueError(
+                    "[AVMAddFramePromptBundle] Either video_state or video_frames must be connected."
+                )
+            video_state = create_video_state(video_frames)
+            print(f"[AVMAddFramePromptBundle] Created video state from {video_frames.shape[0]} frames")
 
         boxes_prompt    = box_and_point.get("boxes")
         positive_points = box_and_point.get("positive")
@@ -2483,7 +2504,7 @@ class AVMAddFramePromptBundle:
                                        is_positive=True)
             )
 
-        # Add points (positive + negative merged)
+        # Add positive + negative points
         all_points, all_labels = [], []
         if positive_points and positive_points.get("points"):
             for pt in positive_points["points"]:
