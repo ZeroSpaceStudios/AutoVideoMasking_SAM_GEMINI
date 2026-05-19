@@ -77,6 +77,24 @@ def bbox_and_points_prompt(target_description, W, H, num_pos_points, num_neg_poi
         f"Negative points ({num_neg_points}):\n"
         "- Identify specific background objects or non-target regions near the\n"
         "  target boundary and place one point on each.\n\n"
+        "Confidence self-assessment (REQUIRED):\n"
+        "- After placing points, judge how reliable THIS keyframe's annotations are\n"
+        "  for downstream segmentation. Score 0.0-1.0 considering:\n"
+        "    • Subject visibility: is the target clearly visible (not heavily occluded,\n"
+        "      truncated at frame edge, or destroyed by motion blur)?\n"
+        "    • Pixel confidence: are you sure your positive points land on target\n"
+        "      pixels and not visually-similar background (e.g. red jacket vs red\n"
+        "      seat upholstery)?\n"
+        "    • Disambiguation: if multiple instances of the target class are present,\n"
+        "      are you confident you picked the right one?\n"
+        "- Be honest. A low score is more useful than an overconfident high score —\n"
+        "  downstream tooling drops low-confidence keyframes rather than acting on\n"
+        "  unreliable hints. Calibration guidance:\n"
+        "    0.9-1.0: target large, sharp, unambiguous — every point is locked in\n"
+        "    0.7-0.9: target visible, points anchored but some uncertainty on edges\n"
+        "    0.4-0.7: target partially occluded / motion-blurred / small / similar\n"
+        "             to nearby distractors — points are best-guess\n"
+        "    0.0-0.4: target barely visible, mostly occluded, or extreme motion blur\n\n"
         "Reasoning: before emitting coordinates, internally note where the target's\n"
         "top, bottom, left, and right edges actually fall, and which sub-features you\n"
         "will anchor positive points to.\n\n"
@@ -85,7 +103,8 @@ def bbox_and_points_prompt(target_description, W, H, num_pos_points, num_neg_poi
         '  "boundary_description": "brief note on target edges and anchor sub-parts",\n'
         '  "bbox": [x1, y1, x2, y2],\n'
         '  "positive": [[x, y], ...],\n'
-        '  "negative": [[x, y], ...]\n'
+        '  "negative": [[x, y], ...],\n'
+        '  "confidence": 0.0-1.0\n'
         '}'
         + few_shot_block
     )
@@ -169,6 +188,20 @@ def face_region_stage2_prompt(cW, cH, region, face_rules, num_fg_points, num_bg_
         "- Identify specific non-target regions near the target boundary\n"
         "  (e.g. 'hair strands above forehead', 'collar below chin') and place\n"
         "  one point on each.\n\n"
+        "Confidence self-assessment (REQUIRED):\n"
+        "- After placing points, judge how reliable THIS keyframe's annotations are\n"
+        "  for downstream segmentation. Score 0.0-1.0 considering:\n"
+        "    • Subject visibility within the crop: is the target clearly visible\n"
+        "      (not heavily occluded, motion-blurred, or partially out of crop)?\n"
+        "    • Pixel confidence: are you sure your foreground points land on target\n"
+        "      pixels and not visually-similar adjacent regions?\n"
+        "- Be honest. A low score is more useful than an overconfident high score —\n"
+        "  downstream tooling drops low-confidence keyframes rather than acting on\n"
+        "  unreliable hints. Calibration:\n"
+        "    0.9-1.0: target large, sharp, unambiguous — every point is locked in\n"
+        "    0.7-0.9: target visible, points anchored but some edge uncertainty\n"
+        "    0.4-0.7: target partially occluded / blurred / small — best-guess points\n"
+        "    0.0-0.4: target barely visible or extreme motion blur\n\n"
         "Reasoning: before emitting coordinates, note which named sub-features you\n"
         "will anchor foreground points to, and which adjacent regions you will use\n"
         "for background points.\n\n"
@@ -176,7 +209,8 @@ def face_region_stage2_prompt(cW, cH, region, face_rules, num_fg_points, num_bg_
         '{\n'
         '  "anchor_plan": "brief note on which sub-features foreground points anchor to",\n'
         '  "foreground": [[x, y], ...],\n'
-        '  "background": [[x, y], ...]\n'
+        '  "background": [[x, y], ...],\n'
+        '  "confidence": 0.0-1.0\n'
         '}'
     )
 

@@ -614,9 +614,46 @@ class VLMtoBBoxAndPoints:
 # SAM3MultiFrameAddPrompt accepts the 1.x family via schema_minor_compatible_with.
 # Independent constant per R2 plan-review judgment (Codex+Gemini agreed on
 # option a: no cross-repo shared module).
-_AVM_MF_SCHEMA_VERSION = "1.4.0"
+#
+# v1.5.0 (D-381): adds optional crop-in mode + confidence-gating.
+#   Top-level additions:
+#     crop_in_enabled: bool
+#     crop_padding: int
+#     confidence_threshold: float (0.0 = gating disabled)
+#     low_confidence_skipped: [int]  (frame_idx values dropped by the gate)
+#   Per-seed additions:
+#     crop_in_applied: bool
+#     crop_meta: {x1, y1, x2, y2, orig_w, orig_h} | null
+#     confidence: float  (Gemini self-assessment, 0.0-1.0; defaults to 1.0
+#                         when the model omits the field)
+# Forward-compat: consumer's `schema_minor_compatible_with: "1.x"` absorbs
+# the bump (WARN, not raise). All new fields are additive — v1.4 consumers
+# silently ignore them.
+_AVM_MF_SCHEMA_VERSION = "1.5.0"
 _AVM_MF_SCHEMA_TYPE = "sam3_seed_prompts"
 _AVM_MF_SCHEMA_MINOR_COMPATIBLE_WITH = "1.x"
+
+# Face-anatomy boundary rules for the two-stage crop-in mode (D-381).
+# Duplicated from VLMFaceRegion._FACE_RULES — kept in sync manually since
+# VLMFaceRegion is defined later in the file. Both nodes target face/head
+# regions so the same anatomical guidance applies.
+_AVM_FACE_REGION_RULES = (
+    "CRITICAL boundary rules:\n"
+    "  • FACE: bbox must include full chin, jaw underside, and any open mouth /\n"
+    "    teeth / tongue interior. Never cut at the lips.\n"
+    "  • NECK: bbox must extend fully to where neck meets collar or shoulders.\n"
+    "    Never cut at the chin.\n"
+    "  • HAIR: bbox extends to hair tips, not just the scalp.\n"
+    "  • Foreground points must be deep inside the region — never on its border.\n"
+    "  • Background points must be just outside the region boundary.\n"
+    "  • Spread points across the WHOLE region, do NOT cluster them.\n"
+)
+
+# Presets where the two-stage crop-in rules read naturally (face-anatomy focus).
+# Other presets still work but emit a soft notice that the rules will read awkwardly.
+_AVM_CROP_IN_HEAD_PRESETS = frozenset({
+    "face", "head", "head_and_shoulders", "hair", "custom",
+})
 
 # Quick-pick subject presets for VLMtoBBoxAndPointsMultiFrame.
 # Sentinel "custom" at index 0 per D-349 (sentinel-FIRST cross-suite rule)
@@ -713,13 +750,42 @@ def _parse_keyframe_indices_strict(s: str, total_frames: int):
     return out
 
 
+def _coerce_confidence(raw_val) -> float:
+    """Coerce a model-reported confidence to [0.0, 1.0].
+
+    Tolerates: missing field (None), numeric str, out-of-range floats, NaN.
+    Default behavior when unparseable / missing: 1.0 (treat as confident — keeps
+    behavior identical to pre-confidence v1.4 when the model omits the field).
+    """
+    if raw_val is None:
+        return 1.0
+    try:
+        v = float(raw_val)
+    except (TypeError, ValueError):
+        return 1.0
+    if not (v == v):  # NaN check
+        return 1.0
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        # Some models emit 0-100 scale despite instructions; rescale.
+        if v <= 100.0:
+            return v / 100.0
+        return 1.0
+    return v
+
+
 def _seed_from_bbox_and_points_response(
     raw: str, frame_idx: int, obj_id: int, num_pos: int, num_neg: int, W: int, H: int
 ):
-    """Parse one Gemini bbox_and_points response into a v1.4 seed dict.
+    """Parse one Gemini bbox_and_points response into a v1.5 seed dict.
 
-    Returns (seed_dict, raw_str). Raises ValueError on parse failure for caller
+    Returns seed_dict. Raises ValueError on parse failure for caller
     to catch and soft-fail per keyframe.
+
+    v1.5 adds `confidence` (model self-assessment) and `crop_in_applied` /
+    `crop_meta` (always False / None for the single-stage path). Confidence
+    defaults to 1.0 when the model omits the field — preserves v1.4 behavior.
     """
     data = _parse_json(raw)
     x1, y1, x2, y2 = data["bbox"]
@@ -737,28 +803,139 @@ def _seed_from_bbox_and_points_response(
     positive_pts = normalize_points(pos_raw, 1)["points"]
     negative_pts = normalize_points(neg_raw, 0)["points"]
 
+    confidence = _coerce_confidence(data.get("confidence"))
+
     return {
         "frame_idx": int(frame_idx),
         "obj_id": int(obj_id),
         "pos_pts": positive_pts,
         "neg_pts": negative_pts,
         "box": [float(cx), float(cy), float(bw), float(bh)],
+        # v1.5 (D-381) — crop-in metadata + confidence self-assessment.
+        # Single-stage path never crops; confidence defaults to 1.0 if the
+        # model omits the field (back-compat with pre-1.5 prompts).
+        "crop_in_applied": False,
+        "crop_meta": None,
+        "confidence": confidence,
     }
+
+
+def _seed_from_crop_in_two_stage(
+    raw1: str, raw2: str, frame_idx: int, obj_id: int,
+    num_pos: int, num_neg: int,
+    pW: int, pH: int, crop_padding: int,
+):
+    """Build a v1.5 seed from two Gemini calls (Stage 1 bbox + Stage 2 points on crop).
+
+    Raises ValueError on parse failure for caller to catch and soft-fail
+    per keyframe — matches the single-stage behavior.
+
+    Returns:
+        (seed_dict, crop_meta_dict) — caller uses crop_meta for logging.
+    """
+    # Stage 1 — tight bbox in full-frame coords
+    d1 = _parse_json(raw1)
+    bx1, by1, bx2, by2 = d1["bbox"]
+    bx1, by1, bx2, by2 = _maybe_normalize_corners(bx1, by1, bx2, by2, pW, pH)
+    # Project normalized [0,1] back to pixel space for crop math
+    bx1_px = bx1 * pW
+    by1_px = by1 * pH
+    bx2_px = bx2 * pW
+    by2_px = by2 * pH
+    # Gemini occasionally swaps corners; ensure x1<x2, y1<y2
+    if bx1_px > bx2_px:
+        bx1_px, bx2_px = bx2_px, bx1_px
+    if by1_px > by2_px:
+        by1_px, by2_px = by2_px, by1_px
+    # Apply padding + clamp to image bounds
+    cx1 = max(0, int(bx1_px) - crop_padding)
+    cy1 = max(0, int(by1_px) - crop_padding)
+    cx2 = min(pW, int(bx2_px) + crop_padding)
+    cy2 = min(pH, int(by2_px) + crop_padding)
+    if cx2 <= cx1 or cy2 <= cy1:
+        raise ValueError(
+            f"Stage1 produced empty crop: "
+            f"[{cx1},{cy1},{cx2},{cy2}] from bbox=[{bx1_px:.1f},{by1_px:.1f},"
+            f"{bx2_px:.1f},{by2_px:.1f}] padding={crop_padding} frame={pW}x{pH}. "
+            f"Stage1 raw: {raw1}"
+        )
+    crop_w = cx2 - cx1
+    crop_h = cy2 - cy1
+
+    # Stage 2 — points placed on the crop
+    d2 = _parse_json(raw2)
+    fg_raw = (d2.get("foreground", []) or [])[:num_pos]
+    bg_raw = (d2.get("background", []) or [])[:num_neg]
+
+    # Project Stage-2 crop-space points to full-frame [0,1]
+    positive_pts = normalize_points_crop_to_full(fg_raw, 1, crop_w, crop_h, cx1, cy1, pW, pH)["points"]
+    negative_pts = normalize_points_crop_to_full(bg_raw, 0, crop_w, crop_h, cx1, cy1, pW, pH)["points"]
+
+    # Confidence is taken from Stage 2 — that's the call that placed the
+    # points feeding SAM3. Stage 1's bbox alone is rarely the failure mode.
+    confidence = _coerce_confidence(d2.get("confidence"))
+
+    # Seed bbox = Stage-1 tight bbox (no padding) in full-frame normalized coords
+    tx1 = max(0.0, min(1.0, bx1_px / pW))
+    ty1 = max(0.0, min(1.0, by1_px / pH))
+    tx2 = max(0.0, min(1.0, bx2_px / pW))
+    ty2 = max(0.0, min(1.0, by2_px / pH))
+    cx = (tx1 + tx2) / 2.0
+    cy = (ty1 + ty2) / 2.0
+    bw = tx2 - tx1
+    bh = ty2 - ty1
+
+    crop_meta = {
+        "x1": int(cx1), "y1": int(cy1),
+        "x2": int(cx2), "y2": int(cy2),
+        "orig_w": int(pW), "orig_h": int(pH),
+    }
+
+    seed = {
+        "frame_idx": int(frame_idx),
+        "obj_id": int(obj_id),
+        "pos_pts": positive_pts,
+        "neg_pts": negative_pts,
+        "box": [float(cx), float(cy), float(bw), float(bh)],
+        "crop_in_applied": True,
+        "crop_meta": crop_meta,
+        "confidence": confidence,
+    }
+    return seed, crop_meta
 
 
 class VLMtoBBoxAndPointsMultiFrame:
     """Multi-frame extension of VLMtoBBoxAndPoints.
 
-    Calls Gemini once per keyframe (parallel-fanned via ThreadPoolExecutor),
-    each call reuses the existing single-frame `bbox_and_points_prompt` and
-    the same parser. Emits a v1.4.0 batched payload (schema_type=
-    "sam3_seed_prompts") containing one seed per keyframe with per-frame
-    `pos_pts`, `neg_pts`, and `box` ([cx,cy,w,h] normalized).
+    Calls Gemini once (or twice, in crop-in mode) per keyframe — parallel-fanned
+    via ThreadPoolExecutor — each call reuses the existing single-frame
+    `bbox_and_points_prompt` and the same parser. Emits a v1.5.0 batched payload
+    (schema_type="sam3_seed_prompts") containing one seed per keyframe with
+    per-frame `pos_pts`, `neg_pts`, and `box` ([cx,cy,w,h] normalized).
+
+    Crop-in mode (D-381, enable_crop_in=True): per keyframe, Stage 1 detects a
+    tight target bbox on the full frame, then Stage 2 places points on the
+    cropped region (~512px instead of ~150px effective face resolution).
+    Mirrors VLMFaceRegion's two-stage pattern. Doubles per-keyframe Gemini
+    call count. Output coords are always full-frame regardless of mode —
+    seeds wire directly into SAM3MultiFrameAddPrompt as before.
+
+    Confidence gating (D-381, confidence_threshold > 0.0): the Gemini prompt
+    now asks for a confidence self-assessment per keyframe (1.0 = certain,
+    0.4 = blurry/occluded). Keyframes below threshold are DROPPED from the
+    payload entirely. Rationale: one low-confidence keyframe injects noisy
+    point prompts that corrupt SAM3's memory propagation for the surrounding
+    ~15-frame neighborhood (forward+backward). Skipping is usually better
+    than including. Threshold 0.0 disables the gate (v1.4 behavior).
 
     Downstream consumer: SAM3MultiFrameAddPrompt (ComfyUI-SAM3_nvFork).
     The consumer accepts the 1.x family via schema_minor_compatible_with;
     payloads from this node carry both points and box, and the consumer
-    applies them as a chained prompt per seed.
+    applies them as a chained prompt per seed. v1.5 adds top-level
+    `crop_in_enabled` / `crop_padding` / `confidence_threshold` /
+    `low_confidence_skipped` plus per-seed `crop_in_applied` / `crop_meta` /
+    `confidence`; the consumer's existing 1.x forward-compat absorbs these
+    as unknown fields.
 
     Single-frame VLMtoBBoxAndPoints is UNTOUCHED — its 5 outputs continue to
     emit unchanged for existing workflows.
@@ -797,6 +974,53 @@ class VLMtoBBoxAndPointsMultiFrame:
                         "deduplicate — if your description repeats the preset "
                         "text, the prompt will too (intentional, lets you "
                         "emphasize)."
+                    ),
+                }),
+                # D-381 crop-in extension — APPENDED at END of required block
+                # per D-201 to preserve widgets_values for legacy workflows.
+                # When False (default), behavior is identical to v1.4 single-stage.
+                "enable_crop_in":     ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": (
+                        "Two-stage crop-in mode (mirrors VLMFaceRegion). When "
+                        "True: per keyframe, Stage 1 detects a tight target "
+                        "bbox on the full frame, then Stage 2 places points on "
+                        "the cropped region at higher effective resolution "
+                        "(~512px instead of ~150px in 1920×1080). DOUBLES the "
+                        "Gemini call count per keyframe. Best on face/head/hair "
+                        "presets — uses face-anatomy boundary rules. Output "
+                        "coords are always full-frame regardless of mode."
+                    ),
+                }),
+                "crop_padding":       ("INT", {
+                    "default": 24, "min": 0, "max": 80, "step": 1,
+                    "tooltip": (
+                        "Pixels of padding around the Stage-1 tight bbox "
+                        "before Stage-2 crop. Larger padding gives Stage 2 "
+                        "more context (better for crops at face boundaries / "
+                        "hair / chin); smaller padding zooms further into the "
+                        "target. Ignored when enable_crop_in=False."
+                    ),
+                }),
+                # D-381 confidence gating — APPENDED at END of required block
+                # per D-201. The Gemini prompt now requests a confidence self-
+                # assessment per keyframe (1.0 = certain, 0.4 = blurry/occluded).
+                # Setting threshold > 0 drops low-confidence keyframes from
+                # the payload entirely, preventing them from corrupting SAM3's
+                # memory propagation. Default 0.0 = disabled (back-compat).
+                "confidence_threshold": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": (
+                        "Drop keyframes where Gemini's self-reported confidence "
+                        "is below this threshold. 0.0 = disabled (accept all "
+                        "keyframes, same as v1.4). 0.5 = drop heavily-blurred / "
+                        "occluded frames. 0.7 = only accept high-confidence "
+                        "anchors. Low-confidence keyframes inject noisy point "
+                        "prompts that corrupt SAM3's memory propagation for a "
+                        "~15-frame neighborhood (forward+backward); skipping "
+                        "them is usually better than including them. Skipped "
+                        "frame indices appear in the info STRING and in the "
+                        "payload's `low_confidence_skipped` field for audit."
                     ),
                 }),
             },
@@ -840,7 +1064,10 @@ class VLMtoBBoxAndPointsMultiFrame:
 
     def run(self, images, api, target_description, keyframe_indices,
             num_pos_points, num_neg_points, parallel_call_count,
-            obj_id, target_preset="custom", few_shot_examples=""):
+            obj_id, target_preset="custom",
+            enable_crop_in=False, crop_padding=24,
+            confidence_threshold=0.0,
+            few_shot_examples=""):
         import concurrent.futures
 
         # ----- Input shape + validation -----
@@ -863,10 +1090,26 @@ class VLMtoBBoxAndPointsMultiFrame:
 
         few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() if few_shot_examples.strip() else ""
 
+        # Soft notice when crop-in is enabled on a non-head preset — FACE_RULES
+        # still applies but reads awkwardly for body/clothing/prop targets.
+        if enable_crop_in and target_preset not in _AVM_CROP_IN_HEAD_PRESETS:
+            print(
+                f"[VLMtoBBoxAndPointsMultiFrame] NOTICE: crop-in enabled with "
+                f"target_preset={target_preset!r} (non-head). The two-stage "
+                f"prompts use face-anatomy boundary rules — they will still "
+                f"work but may not be optimal for this target class."
+            )
+
+        # Clamp confidence_threshold to valid range — Comfy widget bounds should
+        # already enforce this but defensive clamp protects against API callers.
+        confidence_threshold = max(0.0, min(1.0, float(confidence_threshold)))
+
         print(
             f"[VLMtoBBoxAndPointsMultiFrame] T={total_frames}, frame={W}x{H}, "
             f"kf={kf_list}, parallel={parallel_call_count}, model={api.get('model_name')}, "
-            f"target_preset={target_preset!r}, effective_target={effective_target!r}"
+            f"target_preset={target_preset!r}, effective_target={effective_target!r}, "
+            f"crop_in={enable_crop_in} (padding={crop_padding}px), "
+            f"conf_gate={'OFF' if confidence_threshold == 0.0 else f'>={confidence_threshold:.2f}'}"
         )
 
         # ----- Build per-keyframe call tasks -----
@@ -877,28 +1120,94 @@ class VLMtoBBoxAndPointsMultiFrame:
             single_batch = images[t:t+1]
             pil_img = _tensor_to_pil(single_batch)
             pW, pH = pil_img.size
-            prompt = bbox_and_points_prompt(effective_target, pW, pH, num_pos_points, num_neg_points, few_shot_block)
-            raw = _call_gemini(pil_img, prompt, api)
-            seed = _seed_from_bbox_and_points_response(
-                raw, frame_idx=t, obj_id=obj_id, num_pos=num_pos_points, num_neg=num_neg_points, W=pW, H=pH
+
+            if not enable_crop_in:
+                # Single-stage path (v1.4 behavior, unchanged)
+                prompt = bbox_and_points_prompt(effective_target, pW, pH, num_pos_points, num_neg_points, few_shot_block)
+                raw = _call_gemini(pil_img, prompt, api)
+                seed = _seed_from_bbox_and_points_response(
+                    raw, frame_idx=t, obj_id=obj_id, num_pos=num_pos_points, num_neg=num_neg_points, W=pW, H=pH
+                )
+                return t, seed, raw
+
+            # Two-stage crop-in path (D-381, v1.5)
+            # Stage 1 — tight bbox on full frame
+            prompt1 = face_region_stage1_prompt(pW, pH, effective_target, _AVM_FACE_REGION_RULES)
+            raw1 = _call_gemini(pil_img, prompt1, api)
+
+            # Parse Stage 1 to compute crop bounds, then crop & call Stage 2.
+            # The seed builder re-parses raw1; that's fine (cheap) and keeps the
+            # seed builder a pure function of the two raw strings.
+            d1 = _parse_json(raw1)
+            bx1, by1, bx2, by2 = d1["bbox"]
+            bx1n, by1n, bx2n, by2n = _maybe_normalize_corners(bx1, by1, bx2, by2, pW, pH)
+            bx1_px, by1_px = bx1n * pW, by1n * pH
+            bx2_px, by2_px = bx2n * pW, by2n * pH
+            if bx1_px > bx2_px:
+                bx1_px, bx2_px = bx2_px, bx1_px
+            if by1_px > by2_px:
+                by1_px, by2_px = by2_px, by1_px
+            cx1 = max(0, int(bx1_px) - crop_padding)
+            cy1 = max(0, int(by1_px) - crop_padding)
+            cx2 = min(pW, int(bx2_px) + crop_padding)
+            cy2 = min(pH, int(by2_px) + crop_padding)
+            if cx2 <= cx1 or cy2 <= cy1:
+                raise ValueError(
+                    f"[crop-in t={t}] Stage1 produced empty crop: "
+                    f"[{cx1},{cy1},{cx2},{cy2}] padding={crop_padding} frame={pW}x{pH}. "
+                    f"Stage1 raw: {raw1}"
+                )
+            pil_crop = pil_img.crop((cx1, cy1, cx2, cy2))
+            cW, cH = pil_crop.size
+
+            # Stage 2 — high-density points placed on the crop
+            prompt2 = face_region_stage2_prompt(cW, cH, effective_target, _AVM_FACE_REGION_RULES, num_pos_points, num_neg_points)
+            raw2 = _call_gemini(pil_crop, prompt2, api)
+
+            seed, _crop_meta = _seed_from_crop_in_two_stage(
+                raw1, raw2, frame_idx=t, obj_id=obj_id,
+                num_pos=num_pos_points, num_neg=num_neg_points,
+                pW=pW, pH=pH, crop_padding=crop_padding,
             )
-            return t, seed, raw
+            raw_combined = f"=== Stage1 (bbox) ===\n{raw1}\n=== Stage2 (points) ===\n{raw2}"
+            return t, seed, raw_combined
 
         # ----- Fan-out with ThreadPoolExecutor; soft-fail per keyframe -----
         results_by_t = {}
         raw_by_t = {}
         info_lines = []
+        low_confidence_skipped = []  # list of frame_idx dropped by confidence gate
         with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_call_count) as pool:
             future_to_t = {pool.submit(_call_one, t): t for t in kf_list}
             for fut in concurrent.futures.as_completed(future_to_t):
                 t = future_to_t[fut]
                 try:
                     _t, seed, raw = fut.result()
-                    results_by_t[_t] = seed
                     raw_by_t[_t] = raw
                     n_pos = len(seed.get("pos_pts", []))
                     n_neg = len(seed.get("neg_pts", []))
-                    info_lines.append(f"t={_t} accepted=True pos={n_pos} neg={n_neg} box=true")
+                    crop_tag = "true" if seed.get("crop_in_applied") else "false"
+                    conf = float(seed.get("confidence", 1.0))
+                    # Confidence gate (D-381) — drop low-confidence keyframes
+                    # entirely rather than feeding noisy hints to SAM3. Disabled
+                    # when threshold == 0.0 (back-compat with v1.4 behavior).
+                    if confidence_threshold > 0.0 and conf < confidence_threshold:
+                        low_confidence_skipped.append(int(_t))
+                        info_lines.append(
+                            f"t={_t} accepted=False pos=0 neg=0 box=skipped_low_confidence "
+                            f"confidence={conf:.3f} threshold={confidence_threshold:.2f}"
+                        )
+                        print(
+                            f"[VLMtoBBoxAndPointsMultiFrame] keyframe t={_t} DROPPED by "
+                            f"confidence gate: conf={conf:.3f} < threshold={confidence_threshold:.2f} "
+                            f"(was pos={n_pos} neg={n_neg} crop_in={crop_tag})"
+                        )
+                        continue
+                    results_by_t[_t] = seed
+                    info_lines.append(
+                        f"t={_t} accepted=True pos={n_pos} neg={n_neg} box=true "
+                        f"crop_in={crop_tag} confidence={conf:.3f}"
+                    )
                 except Exception as e:
                     err_str = f"{type(e).__name__}: {e}"
                     print(f"[VLMtoBBoxAndPointsMultiFrame] WARN keyframe t={t} failed: {err_str}")
@@ -906,8 +1215,21 @@ class VLMtoBBoxAndPointsMultiFrame:
                     raw_by_t[t] = f"[ERROR t={t}] {err_str}"
 
         if not results_by_t:
+            # Distinguish "all parse-failed" from "all dropped by confidence gate"
+            # so the error message points to the right knob.
+            n_gated = len(low_confidence_skipped)
+            n_failed = len(kf_list) - n_gated
+            if n_gated > 0 and n_failed == 0:
+                raise RuntimeError(
+                    f"[VLMtoBBoxAndPointsMultiFrame] All {len(kf_list)} keyframes "
+                    f"dropped by confidence gate (threshold={confidence_threshold:.2f}, "
+                    f"skipped_frames={low_confidence_skipped}). Lower the threshold or "
+                    f"disable gating (set to 0.0) to ship at least one keyframe. "
+                    f"info:\n" + "\n".join(info_lines)
+                )
             raise RuntimeError(
-                f"[VLMtoBBoxAndPointsMultiFrame] All {len(kf_list)} keyframes failed parsing. "
+                f"[VLMtoBBoxAndPointsMultiFrame] All {len(kf_list)} keyframes failed "
+                f"(parse_failures={n_failed}, confidence_gated={n_gated}). "
                 f"Chain is broken — check raw_vlm_responses output for Gemini response details. "
                 f"info:\n" + "\n".join(info_lines)
             )
@@ -915,7 +1237,7 @@ class VLMtoBBoxAndPointsMultiFrame:
         accepted_frames = sorted(results_by_t.keys())
         seeds_sorted = [results_by_t[t] for t in accepted_frames]
 
-        # ----- Assemble v1.4 payload -----
+        # ----- Assemble v1.5 payload -----
         payload = {
             "schema_type": _AVM_MF_SCHEMA_TYPE,
             "schema_version": _AVM_MF_SCHEMA_VERSION,
@@ -936,17 +1258,34 @@ class VLMtoBBoxAndPointsMultiFrame:
             "total_frames": total_frames,
             "accepted_frames": accepted_frames,
             "seeds": seeds_sorted,
+            # v1.5 (D-381) — top-level crop-in flag for downstream tooling.
+            # Per-seed `crop_in_applied` + `crop_meta` live inside each seed.
+            "crop_in_enabled": bool(enable_crop_in),
+            "crop_padding": int(crop_padding),
+            # v1.5 (D-381) — confidence gating audit trail. `confidence_threshold`
+            # is the value used this run (0.0 = gating disabled). `low_confidence_skipped`
+            # lists frame_idx values that Gemini self-scored below threshold and
+            # were therefore excluded from `seeds`. Per-seed `confidence` lives
+            # inside each entry of `seeds` for downstream weighting tooling.
+            "confidence_threshold": float(confidence_threshold),
+            "low_confidence_skipped": sorted(low_confidence_skipped),
         }
 
         # ----- Compose info STRING (compact, multi-line) -----
         n_accepted = len(accepted_frames)
         n_requested = len(kf_list)
+        n_gated = len(low_confidence_skipped)
         # ThreadPoolExecutor doesn't expose true batch count; approximate as
         # ceil(n_requested / parallel_call_count) for telemetry.
         n_batches = (n_requested + parallel_call_count - 1) // parallel_call_count
+        gate_summary = (
+            f"confidence_gated={n_gated}/{n_requested}"
+            if confidence_threshold > 0.0 else "confidence_gate=OFF"
+        )
         summary = (
             f"effective_keyframes={n_accepted}/{n_requested} "
-            f"parallel_batches={n_batches} schema_version={_AVM_MF_SCHEMA_VERSION}"
+            f"parallel_batches={n_batches} {gate_summary} "
+            f"schema_version={_AVM_MF_SCHEMA_VERSION}"
         )
         info_str = "\n".join(info_lines) + "\n" + summary
 
