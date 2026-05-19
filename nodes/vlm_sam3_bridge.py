@@ -1542,6 +1542,239 @@ class VLMDebugPreview:
 
 
 # =============================================================================
+# VLMMultiFrameBBoxPreview (D-380) — per-keyframe debug overlay
+# =============================================================================
+
+class VLMMultiFrameBBoxPreview:
+    """Debug overlay node — renders box + positives + negatives per accepted
+    keyframe from a VLMtoBBoxAndPointsMultiFrame v1.5 seed_prompts payload.
+
+    Output is an IMAGE batch with one preview frame per accepted seed (sorted
+    by frame_idx), so you can wire it into NV Preview Animation or video
+    saver and scrub through what Gemini placed at each keyframe.
+
+    Reuses the drawing primitives from VLMDebugPreview but iterates the v1.5
+    seeds list and pulls each seed's frame from the full IMAGE batch.
+
+    When seeds carry v1.5 crop_meta (i.e. crop_in_applied=True), the crop_box
+    is also rendered (yellow outline) so you can verify which area Gemini was
+    looking at during Stage 2 — useful for diagnosing why crop-in helps OR
+    hurts on a given clip class.
+    """
+
+    FG_COLOR = (50, 210, 50)         # positive points — green
+    BG_COLOR = (210, 50, 50)         # negative points — red
+    BBOX_COLOR = (80, 120, 255)      # detection bbox — blue
+    CROP_COLOR = (255, 220, 50)      # crop_box (stage 2 area) — yellow
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE", {
+                    "tooltip": "Full image batch [T,H,W,C] — the same batch fed "
+                               "to VLMtoBBoxAndPointsMultiFrame. Each accepted "
+                               "seed's frame_idx is used to pick the right "
+                               "source frame.",
+                }),
+                "seed_prompts": ("STRING", {
+                    "default": "", "multiline": True, "forceInput": True,
+                    "tooltip": "Wire from VLMtoBBoxAndPointsMultiFrame.seed_prompts "
+                               "(v1.4 or v1.5 JSON payload).",
+                }),
+            },
+            "optional": {
+                "line_width": ("INT", {
+                    "default": 3, "min": 1, "max": 10, "step": 1,
+                    "tooltip": "Bbox outline thickness (px)."
+                }),
+                "point_radius": ("INT", {
+                    "default": 12, "min": 3, "max": 40, "step": 1,
+                    "tooltip": "Per-point overlay radius (px). Default larger than "
+                               "single-frame VLMDebugPreview for easier visual "
+                               "inspection of per-keyframe placement patterns.",
+                }),
+                "show_labels": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Annotate each preview with frame_idx + confidence "
+                               "+ crop_in flag at the top-left.",
+                }),
+                "show_crop_box": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "When the seed has crop_meta (crop_in_applied=True), "
+                               "render the crop bounds as a yellow outline. Lets you "
+                               "verify which area Gemini was looking at during "
+                               "Stage 2 point placement.",
+                }),
+                "show_fg_bg_indices": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Number each point ('fg1', 'fg2', 'bg1', ...). Off "
+                               "by default — busy at 8 pos + 4 neg per frame.",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("preview_batch", "info")
+    FUNCTION = "draw"
+    CATEGORY = "AVM"
+    DESCRIPTION = (
+        "Per-keyframe debug overlay for VLMtoBBoxAndPointsMultiFrame seeds. "
+        "Renders one preview frame per accepted seed showing box (blue) + "
+        "positive points (green) + negative points (red) + crop_box (yellow, "
+        "when crop_in was on). Output is IMAGE batch — wire to NV Preview "
+        "Animation to scrub through and visually verify what Gemini placed "
+        "at each keyframe."
+    )
+
+    def draw(self, images, seed_prompts,
+             line_width=3, point_radius=12, show_labels=True,
+             show_crop_box=True, show_fg_bg_indices=False):
+        import torch
+        from PIL import ImageDraw
+
+        # Shape + payload validation
+        if not hasattr(images, "shape") or len(images.shape) != 4:
+            raise ValueError(
+                f"[VLMMultiFrameBBoxPreview] images must be IMAGE tensor "
+                f"[T,H,W,C] (4-D), got shape="
+                f"{tuple(getattr(images, 'shape', ()))!r}"
+            )
+        T = int(images.shape[0])
+        H = int(images.shape[1])
+        W = int(images.shape[2])
+
+        if not seed_prompts or not seed_prompts.strip():
+            # Empty input — return an empty single-frame placeholder image
+            # so downstream IMAGE consumers don't crash.
+            placeholder = torch.zeros((1, H, W, 3), dtype=torch.float32)
+            return (placeholder, "[VLMMultiFrameBBoxPreview] empty seed_prompts — placeholder emitted")
+
+        try:
+            payload = json.loads(seed_prompts)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"[VLMMultiFrameBBoxPreview] seed_prompts is not valid JSON: {e}"
+            )
+
+        seeds = payload.get("seeds") if isinstance(payload, dict) else None
+        if not isinstance(seeds, list) or not seeds:
+            placeholder = torch.zeros((1, H, W, 3), dtype=torch.float32)
+            return (placeholder, "[VLMMultiFrameBBoxPreview] no seeds in payload — placeholder emitted")
+
+        # Sort by frame_idx so the output batch is temporally ordered
+        seeds_sorted = sorted(
+            (s for s in seeds if isinstance(s, dict) and "frame_idx" in s),
+            key=lambda s: int(s["frame_idx"])
+        )
+
+        previews = []
+        info_lines = []
+        skipped = 0
+        r = int(point_radius)
+        lw = int(line_width)
+
+        for seed in seeds_sorted:
+            frame_idx = int(seed["frame_idx"])
+            if frame_idx < 0 or frame_idx >= T:
+                skipped += 1
+                info_lines.append(
+                    f"  seed frame_idx={frame_idx} out of range [0, {T}); skipped"
+                )
+                continue
+
+            # Pull the source frame: images[frame_idx] is [H, W, C].
+            # _tensor_to_pil indexes [0] internally, so wrap in batch dim.
+            single = images[frame_idx:frame_idx + 1]
+            pil = _tensor_to_pil(single).copy()
+            draw = ImageDraw.Draw(pil)
+
+            # ----- Bbox (blue) — from seed["box"] (cxcywh normalized) -----
+            box = seed.get("box")
+            if isinstance(box, list) and len(box) == 4:
+                cx, cy, bw, bh = box
+                x1 = int((cx - bw / 2) * W)
+                y1 = int((cy - bh / 2) * H)
+                x2 = int((cx + bw / 2) * W)
+                y2 = int((cy + bh / 2) * H)
+                draw.rectangle([x1, y1, x2, y2], outline=self.BBOX_COLOR, width=lw)
+
+            # ----- crop_box (yellow) — v1.5 crop_meta if crop_in was on -----
+            if show_crop_box:
+                cm = seed.get("crop_meta")
+                if isinstance(cm, dict):
+                    cx1, cy1 = int(cm.get("x1", 0)), int(cm.get("y1", 0))
+                    cx2, cy2 = int(cm.get("x2", 0)), int(cm.get("y2", 0))
+                    if cx2 > cx1 and cy2 > cy1:
+                        # Dashed-look approximation — outline is solid; draw
+                        # corner ticks inside for visual distinction from bbox.
+                        draw.rectangle([cx1, cy1, cx2, cy2],
+                                       outline=self.CROP_COLOR, width=max(1, lw - 1))
+
+            # ----- Positive points (green) -----
+            for i, pt in enumerate(seed.get("pos_pts", []) or []):
+                if not (isinstance(pt, (list, tuple)) and len(pt) == 2):
+                    continue
+                px = int(pt[0] * W)
+                py = int(pt[1] * H)
+                draw.ellipse([px - r - 2, py - r - 2, px + r + 2, py + r + 2], fill=(255, 255, 255))
+                draw.ellipse([px - r, py - r, px + r, py + r], fill=self.FG_COLOR)
+                draw.ellipse([px - 2, py - 2, px + 2, py + 2], fill=(255, 255, 255))
+                if show_fg_bg_indices:
+                    draw.text((px + r + 4, py - 6), f"fg{i + 1}", fill=self.FG_COLOR)
+
+            # ----- Negative points (red) -----
+            for i, pt in enumerate(seed.get("neg_pts", []) or []):
+                if not (isinstance(pt, (list, tuple)) and len(pt) == 2):
+                    continue
+                px = int(pt[0] * W)
+                py = int(pt[1] * H)
+                draw.ellipse([px - r - 2, py - r - 2, px + r + 2, py + r + 2], fill=(255, 255, 255))
+                draw.ellipse([px - r, py - r, px + r, py + r], fill=self.BG_COLOR)
+                # X marker
+                draw.line([px - r // 2, py - r // 2, px + r // 2, py + r // 2],
+                          fill=(255, 255, 255), width=2)
+                draw.line([px + r // 2, py - r // 2, px - r // 2, py + r // 2],
+                          fill=(255, 255, 255), width=2)
+                if show_fg_bg_indices:
+                    draw.text((px + r + 4, py - 6), f"bg{i + 1}", fill=self.BG_COLOR)
+
+            # ----- Top-left annotation header -----
+            if show_labels:
+                conf = seed.get("confidence")
+                crop_on = bool(seed.get("crop_in_applied"))
+                conf_str = f"{conf:.2f}" if isinstance(conf, (int, float)) else "—"
+                header = (
+                    f"frame={frame_idx}  conf={conf_str}  "
+                    f"crop_in={'Y' if crop_on else 'N'}  "
+                    f"obj={seed.get('obj_id', '?')}"
+                )
+                # Background bar for readability
+                draw.rectangle([0, 0, min(W, 480), 24], fill=(0, 0, 0))
+                draw.text((6, 6), header, fill=(255, 255, 255))
+
+            arr = np.array(pil).astype(np.float32) / 255.0
+            previews.append(torch.from_numpy(arr))
+
+        if not previews:
+            placeholder = torch.zeros((1, H, W, 3), dtype=torch.float32)
+            return (placeholder, f"[VLMMultiFrameBBoxPreview] no seeds rendered "
+                                 f"({skipped} skipped out of range)")
+
+        preview_batch = torch.stack(previews, dim=0)
+        info_str = (
+            f"[VLMMultiFrameBBoxPreview] rendered {preview_batch.shape[0]} previews "
+            f"({skipped} skipped). Frame range: "
+            f"{int(seeds_sorted[0]['frame_idx'])}-{int(seeds_sorted[-1]['frame_idx'])}. "
+            f"Source batch: T={T}, frame={W}x{H}."
+        )
+        if info_lines:
+            info_str += "\n" + "\n".join(info_lines)
+
+        return (preview_batch, info_str)
+
+
+# =============================================================================
 # AVMCropByBox
 # =============================================================================
 
@@ -2997,6 +3230,7 @@ NODE_CLASS_MAPPINGS = {
     "VLMtoMultiBBox":                  VLMtoMultiBBox,
     "VLMBBoxPreview":                  VLMBBoxPreview,
     "VLMDebugPreview":                 VLMDebugPreview,
+    "VLMMultiFrameBBoxPreview":        VLMMultiFrameBBoxPreview,
     "AVMAddFramePrompt":               AVMAddFramePrompt,
     "VLMFacePartsBBox":                VLMFacePartsBBox,
     "VLMFacePrecisePoints":            VLMFacePrecisePoints,
@@ -3025,6 +3259,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VLMtoMultiBBox":                  "AVM VLM → Multi BBox",
     "VLMBBoxPreview":                  "AVM BBox Preview",
     "VLMDebugPreview":                 "AVM Debug Preview",
+    "VLMMultiFrameBBoxPreview":        "AVM Multi-Frame BBox Preview",
     "AVMAddFramePrompt":               "AVM Add Frame Prompt",
     "VLMFacePartsBBox":                "AVM VLM → Face Parts BBox",
     "VLMFacePrecisePoints":            "AVM VLM → Face Points",
