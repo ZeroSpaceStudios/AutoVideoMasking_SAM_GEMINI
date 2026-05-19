@@ -607,6 +607,250 @@ class VLMtoBBoxAndPoints:
 
 
 # =============================================================================
+# VLMtoBBoxAndPointsMultiFrame — multi-frame extension feeding SAM3MultiFrameAddPrompt
+# =============================================================================
+
+# Schema version emitted by the multi-frame producer. The SAM3 fork's
+# SAM3MultiFrameAddPrompt accepts the 1.x family via schema_minor_compatible_with.
+# Independent constant per R2 plan-review judgment (Codex+Gemini agreed on
+# option a: no cross-repo shared module).
+_AVM_MF_SCHEMA_VERSION = "1.4.0"
+_AVM_MF_SCHEMA_TYPE = "sam3_seed_prompts"
+_AVM_MF_SCHEMA_MINOR_COMPATIBLE_WITH = "1.x"
+
+
+def _parse_keyframe_indices_strict(s: str, total_frames: int):
+    """Validate keyframe_indices STRING pre-dispatch.
+
+    Required: JSON int array, every value in [0, total_frames), no duplicates.
+    Raises ValueError with diagnostic on any malformation.
+    """
+    if not isinstance(s, str) or not s.strip():
+        raise ValueError("[VLMtoBBoxAndPointsMultiFrame] keyframe_indices must be non-empty STRING JSON")
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"[VLMtoBBoxAndPointsMultiFrame] keyframe_indices invalid JSON: {e}")
+    if not isinstance(parsed, list):
+        raise ValueError(
+            f"[VLMtoBBoxAndPointsMultiFrame] keyframe_indices must be a JSON int array, "
+            f"got {type(parsed).__name__}"
+        )
+    if not parsed:
+        raise ValueError("[VLMtoBBoxAndPointsMultiFrame] keyframe_indices is empty — nothing to process")
+    out = []
+    seen = set()
+    for i, v in enumerate(parsed):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(
+                f"[VLMtoBBoxAndPointsMultiFrame] keyframe_indices[{i}]={v!r} is not an int"
+            )
+        if v < 0 or v >= total_frames:
+            raise ValueError(
+                f"[VLMtoBBoxAndPointsMultiFrame] keyframe_indices[{i}]={v} out of range "
+                f"[0, {total_frames})"
+            )
+        if v in seen:
+            raise ValueError(
+                f"[VLMtoBBoxAndPointsMultiFrame] keyframe_indices has duplicate value {v}"
+            )
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _seed_from_bbox_and_points_response(
+    raw: str, frame_idx: int, obj_id: int, num_pos: int, num_neg: int, W: int, H: int
+):
+    """Parse one Gemini bbox_and_points response into a v1.4 seed dict.
+
+    Returns (seed_dict, raw_str). Raises ValueError on parse failure for caller
+    to catch and soft-fail per keyframe.
+    """
+    data = _parse_json(raw)
+    x1, y1, x2, y2 = data["bbox"]
+    pos_raw = data.get("positive", []) or []
+    neg_raw = data.get("negative", []) or []
+    pos_raw = pos_raw[:num_pos]
+    neg_raw = neg_raw[:num_neg]
+
+    x1n, y1n, x2n, y2n = _maybe_normalize_corners(x1, y1, x2, y2, W, H)
+    cx = (x1n + x2n) / 2
+    cy = (y1n + y2n) / 2
+    bw = x2n - x1n
+    bh = y2n - y1n
+
+    positive_pts = normalize_points(pos_raw, 1)["points"]
+    negative_pts = normalize_points(neg_raw, 0)["points"]
+
+    return {
+        "frame_idx": int(frame_idx),
+        "obj_id": int(obj_id),
+        "pos_pts": positive_pts,
+        "neg_pts": negative_pts,
+        "box": [float(cx), float(cy), float(bw), float(bh)],
+    }
+
+
+class VLMtoBBoxAndPointsMultiFrame:
+    """Multi-frame extension of VLMtoBBoxAndPoints.
+
+    Calls Gemini once per keyframe (parallel-fanned via ThreadPoolExecutor),
+    each call reuses the existing single-frame `bbox_and_points_prompt` and
+    the same parser. Emits a v1.4.0 batched payload (schema_type=
+    "sam3_seed_prompts") containing one seed per keyframe with per-frame
+    `pos_pts`, `neg_pts`, and `box` ([cx,cy,w,h] normalized).
+
+    Downstream consumer: SAM3MultiFrameAddPrompt (ComfyUI-SAM3_nvFork).
+    The consumer accepts the 1.x family via schema_minor_compatible_with;
+    payloads from this node carry both points and box, and the consumer
+    applies them as a chained prompt per seed.
+
+    Single-frame VLMtoBBoxAndPoints is UNTOUCHED — its 5 outputs continue to
+    emit unchanged for existing workflows.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images":             ("IMAGE", {"tooltip": "Image batch [T,H,W,C] — wire from VHS_LoadVideoPath or equivalent."}),
+                "api":                ("AVM_API",),
+                "target_description": ("STRING", {"default": "the main subject", "multiline": False,
+                                                    "tooltip": "Subject description passed to Gemini per keyframe."}),
+                "keyframe_indices":   ("STRING", {"default": "[0]", "forceInput": True,
+                                                    "tooltip": "JSON int array, e.g. [5,13,25,60,72,88]. Wire from NV_KeyframeSampler.keyframe_indices."}),
+                "num_pos_points":     ("INT", {"default": 6, "min": 1, "max": 12}),
+                "num_neg_points":     ("INT", {"default": 3, "min": 0, "max": 6}),
+                "parallel_call_count": ("INT", {"default": 3, "min": 1, "max": 7,
+                                                    "tooltip": "Max concurrent Gemini calls. One call per keyframe; fanned out in batches."}),
+                "obj_id":             ("INT", {"default": 1, "min": 1, "max": 100,
+                                                    "tooltip": "SAM3 obj_id for every emitted seed. Match downstream Multi-Frame Add Prompt."}),
+            },
+            "optional": {
+                "few_shot_examples": ("STRING", {"default": "", "multiline": True}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("seed_prompts", "raw_vlm_responses", "info")
+    FUNCTION     = "run"
+    CATEGORY     = "AVM"
+    DESCRIPTION  = (
+        "Multi-frame Gemini → SAM3 prompt generator. Mirrors VLMtoBBoxAndPoints "
+        "per keyframe, batches into a v1.4 sam3_seed_prompts payload for "
+        "SAM3MultiFrameAddPrompt downstream."
+    )
+
+    def run(self, images, api, target_description, keyframe_indices,
+            num_pos_points, num_neg_points, parallel_call_count,
+            obj_id, few_shot_examples=""):
+        import concurrent.futures
+
+        # ----- Input shape + validation -----
+        if not hasattr(images, "shape") or len(images.shape) != 4:
+            raise ValueError(
+                f"[VLMtoBBoxAndPointsMultiFrame] images must be IMAGE tensor "
+                f"[T,H,W,C] (4-D), got shape="
+                f"{tuple(getattr(images, 'shape', ()))!r} type={type(images).__name__}"
+            )
+        total_frames = int(images.shape[0])
+        H, W = int(images.shape[1]), int(images.shape[2])
+
+        kf_list = _parse_keyframe_indices_strict(keyframe_indices, total_frames)
+
+        few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() if few_shot_examples.strip() else ""
+
+        print(
+            f"[VLMtoBBoxAndPointsMultiFrame] T={total_frames}, frame={W}x{H}, "
+            f"kf={kf_list}, parallel={parallel_call_count}, model={api.get('model_name')}"
+        )
+
+        # ----- Build per-keyframe call tasks -----
+        def _call_one(t: int):
+            # images[t:t+1] preserves the [1,H,W,C] batch shape that AVM's
+            # _tensor_to_pil expects (it indexes [0] internally — passing
+            # images[t] would strip the batch dim and break the helper).
+            single_batch = images[t:t+1]
+            pil_img = _tensor_to_pil(single_batch)
+            pW, pH = pil_img.size
+            prompt = bbox_and_points_prompt(target_description, pW, pH, num_pos_points, num_neg_points, few_shot_block)
+            raw = _call_gemini(pil_img, prompt, api)
+            seed = _seed_from_bbox_and_points_response(
+                raw, frame_idx=t, obj_id=obj_id, num_pos=num_pos_points, num_neg=num_neg_points, W=pW, H=pH
+            )
+            return t, seed, raw
+
+        # ----- Fan-out with ThreadPoolExecutor; soft-fail per keyframe -----
+        results_by_t = {}
+        raw_by_t = {}
+        info_lines = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_call_count) as pool:
+            future_to_t = {pool.submit(_call_one, t): t for t in kf_list}
+            for fut in concurrent.futures.as_completed(future_to_t):
+                t = future_to_t[fut]
+                try:
+                    _t, seed, raw = fut.result()
+                    results_by_t[_t] = seed
+                    raw_by_t[_t] = raw
+                    n_pos = len(seed.get("pos_pts", []))
+                    n_neg = len(seed.get("neg_pts", []))
+                    info_lines.append(f"t={_t} accepted=True pos={n_pos} neg={n_neg} box=true")
+                except Exception as e:
+                    err_str = f"{type(e).__name__}: {e}"
+                    print(f"[VLMtoBBoxAndPointsMultiFrame] WARN keyframe t={t} failed: {err_str}")
+                    info_lines.append(f"t={t} accepted=False pos=0 neg=0 box=skipped_malformed error={err_str}")
+                    raw_by_t[t] = f"[ERROR t={t}] {err_str}"
+
+        if not results_by_t:
+            raise RuntimeError(
+                f"[VLMtoBBoxAndPointsMultiFrame] All {len(kf_list)} keyframes failed parsing. "
+                f"Chain is broken — check raw_vlm_responses output for Gemini response details. "
+                f"info:\n" + "\n".join(info_lines)
+            )
+
+        accepted_frames = sorted(results_by_t.keys())
+        seeds_sorted = [results_by_t[t] for t in accepted_frames]
+
+        # ----- Assemble v1.4 payload -----
+        payload = {
+            "schema_type": _AVM_MF_SCHEMA_TYPE,
+            "schema_version": _AVM_MF_SCHEMA_VERSION,
+            "schema_minor_compatible_with": _AVM_MF_SCHEMA_MINOR_COMPATIBLE_WITH,
+            "generator_node": "VLMtoBBoxAndPointsMultiFrame",
+            "target_description": target_description,
+            "frame_width": W,
+            "frame_height": H,
+            "total_frames": total_frames,
+            "accepted_frames": accepted_frames,
+            "seeds": seeds_sorted,
+        }
+
+        # ----- Compose info STRING (compact, multi-line) -----
+        n_accepted = len(accepted_frames)
+        n_requested = len(kf_list)
+        # ThreadPoolExecutor doesn't expose true batch count; approximate as
+        # ceil(n_requested / parallel_call_count) for telemetry.
+        n_batches = (n_requested + parallel_call_count - 1) // parallel_call_count
+        summary = (
+            f"effective_keyframes={n_accepted}/{n_requested} "
+            f"parallel_batches={n_batches} schema_version={_AVM_MF_SCHEMA_VERSION}"
+        )
+        info_str = "\n".join(info_lines) + "\n" + summary
+
+        # ----- Concatenate raw responses for debug -----
+        raw_concat = "\n".join(
+            f"=== t={t} ===\n{raw_by_t.get(t, '')}" for t in kf_list
+        )
+
+        print(
+            f"[VLMtoBBoxAndPointsMultiFrame] {summary}"
+        )
+
+        return (json.dumps(payload), raw_concat, info_str)
+
+
+# =============================================================================
 # VLMPromptEditor — inspect and override the Gemini prompt inside the node
 # =============================================================================
 
@@ -2266,6 +2510,7 @@ NODE_CLASS_MAPPINGS = {
     "AVMAPIConfig":                    AVMAPIConfig,
     "VLMImageTest":                    VLMImageTest,
     "VLMtoBBoxAndPoints":              VLMtoBBoxAndPoints,
+    "VLMtoBBoxAndPointsMultiFrame":    VLMtoBBoxAndPointsMultiFrame,
     "VLMtoBBox":                       VLMtoBBox,
     "VLMtoPoints":                     VLMtoPoints,
     "VLMtoMultiBBox":                  VLMtoMultiBBox,
@@ -2293,6 +2538,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AVMAPIConfig":                    "AVM API Config",
     "VLMImageTest":                    "AVM VLM Test",
     "VLMtoBBoxAndPoints":              "AVM VLM → BBox + Points",
+    "VLMtoBBoxAndPointsMultiFrame":    "AVM VLM → BBox + Points (Multi-Frame)",
     "VLMtoBBox":                       "AVM VLM → BBox",
     "VLMtoPoints":                     "AVM VLM → Points",
     "VLMtoMultiBBox":                  "AVM VLM → Multi BBox",
