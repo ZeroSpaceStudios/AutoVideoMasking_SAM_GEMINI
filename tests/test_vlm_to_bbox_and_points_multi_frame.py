@@ -163,7 +163,7 @@ def test_producer_emits_v1_4_payload_with_all_seed_fields(monkeypatch):
     _install_gemini_mock(monkeypatch)
     node = VLMtoBBoxAndPointsMultiFrame()
     images = FakeImages(T=100, H=1080, W=1920)
-    seed_json, raw, info = node.run(
+    seed_json, raw, info, _ibp, _ibsp, _ipp, _inp, _ifi = node.run(
         images=images, api=_make_api(), target_description="the main subject",
         keyframe_indices="[5, 13, 25]",
         num_pos_points=3, num_neg_points=1,
@@ -200,7 +200,7 @@ def test_producer_box_format_is_cxcywh_normalized(monkeypatch):
     _install_gemini_mock(monkeypatch, response_factory=canned)
     node = VLMtoBBoxAndPointsMultiFrame()
     images = FakeImages(T=100, H=1080, W=1920)
-    seed_json, _, _ = node.run(
+    seed_json, _, _, _ibp, _ibsp, _ipp, _inp, _ifi = node.run(
         images=images, api=_make_api(), target_description="x",
         keyframe_indices="[10]",
         num_pos_points=3, num_neg_points=1,
@@ -237,7 +237,7 @@ def test_n_equals_1_semantic_equivalence(monkeypatch):
     # Multi-frame at N=1
     node = VLMtoBBoxAndPointsMultiFrame()
     images = FakeImages(T=100, H=1080, W=1920)
-    seed_json, _, _ = node.run(
+    seed_json, _, _, _ibp, _ibsp, _ipp, _inp, _ifi = node.run(
         images=images, api=_make_api(), target_description="subject",
         keyframe_indices="[0]",
         num_pos_points=6, num_neg_points=3,
@@ -300,6 +300,100 @@ def test_invalid_image_shape_raises_with_diagnostic(monkeypatch):
         )
 
 
+# ---------------------------------------------------------------------------
+# Init outputs (Strategy C — single-node init + batch)
+# ---------------------------------------------------------------------------
+
+def test_init_outputs_derived_from_first_accepted_seed(monkeypatch):
+    """Init outputs are reformatted from the first accepted seed (lowest
+    frame_idx). They feed SAM3VideoSegmentation directly so a separate
+    single-frame VLMtoBBoxAndPoints call is not required."""
+    canned = _make_canned_response(
+        box=(200, 150, 800, 750),
+        pos=[[400, 300], [600, 400]],
+        neg=[[50, 50], [950, 950]],
+    )
+    def respond(pil_img, prompt, api):
+        return canned
+    _install_gemini_mock(monkeypatch, response_factory=respond)
+    node = VLMtoBBoxAndPointsMultiFrame()
+    images = FakeImages(T=100, H=1080, W=1920)
+    out = node.run(
+        images=images, api=_make_api(), target_description="x",
+        keyframe_indices="[5, 13, 25]",
+        num_pos_points=6, num_neg_points=3,
+        parallel_call_count=1, obj_id=7,
+    )
+    assert len(out) == 8, f"expected 8 outputs, got {len(out)}"
+    (seed_json, _raw, _info,
+     init_box_prompt, init_boxes_prompt,
+     init_positive_points, init_negative_points,
+     init_frame_idx) = out
+
+    # init_frame_idx = first accepted keyframe (lowest frame_idx)
+    assert init_frame_idx == 5
+
+    # init_box_prompt (singular): matches the first seed's box
+    payload = json.loads(seed_json)
+    first_seed = payload["seeds"][0]
+    assert init_box_prompt == {"box": first_seed["box"], "label": True}
+
+    # init_boxes_prompt (plural): same box, wrapped in batch shape
+    assert init_boxes_prompt == {
+        "boxes": [first_seed["box"]],
+        "labels": [True],
+    }
+
+    # init_positive_points: same pts as first seed, labels = [1, 1, ...]
+    assert init_positive_points["points"] == first_seed["pos_pts"]
+    assert init_positive_points["labels"] == [1] * len(first_seed["pos_pts"])
+
+    # init_negative_points: same pts as first seed, labels = [0, 0, ...]
+    assert init_negative_points["points"] == first_seed["neg_pts"]
+    assert init_negative_points["labels"] == [0] * len(first_seed["neg_pts"])
+
+
+def test_init_frame_idx_when_zero_in_keyframes(monkeypatch):
+    """When keyframe_indices includes 0, init_frame_idx is 0 (works with
+    SAM3VideoSegmentation's default frame_idx=0; no wiring change needed)."""
+    _install_gemini_mock(monkeypatch)
+    node = VLMtoBBoxAndPointsMultiFrame()
+    images = FakeImages(T=100, H=1080, W=1920)
+    out = node.run(
+        images=images, api=_make_api(), target_description="x",
+        keyframe_indices="[0, 5, 13]",
+        num_pos_points=3, num_neg_points=1,
+        parallel_call_count=1, obj_id=1,
+    )
+    init_frame_idx = out[7]
+    assert init_frame_idx == 0
+
+
+def test_init_outputs_skip_failed_first_keyframe(monkeypatch):
+    """If the first requested keyframe fails Gemini parsing, init_frame_idx
+    advances to the first SUCCESSFUL keyframe — matches the same fallback
+    semantics SAM3VideoSegmentation needs to see."""
+    call_idx = {"n": 0}
+    def flaky(pil_img, prompt, api):
+        call_idx["n"] += 1
+        # First keyframe (t=5) fails; subsequent succeed
+        if call_idx["n"] == 1:
+            return "{ malformed json"
+        return _make_canned_response()
+    _install_gemini_mock(monkeypatch, response_factory=flaky)
+    node = VLMtoBBoxAndPointsMultiFrame()
+    images = FakeImages(T=100, H=1080, W=1920)
+    out = node.run(
+        images=images, api=_make_api(), target_description="x",
+        keyframe_indices="[5, 13, 25]",
+        num_pos_points=3, num_neg_points=1,
+        parallel_call_count=1, obj_id=1,  # sequential so first call IS t=5
+    )
+    # accepted_frames was [13, 25], first accepted = 13
+    init_frame_idx = out[7]
+    assert init_frame_idx == 13, f"expected init_frame_idx=13, got {init_frame_idx}"
+
+
 def test_partial_failure_soft_skips_failed_keyframe(monkeypatch):
     """If one keyframe parse fails, other keyframes still produce seeds.
     Failed keyframe absent from accepted_frames + info reports the error."""
@@ -315,7 +409,7 @@ def test_partial_failure_soft_skips_failed_keyframe(monkeypatch):
     _install_gemini_mock(monkeypatch, response_factory=flaky_respond)
     node = VLMtoBBoxAndPointsMultiFrame()
     images = FakeImages(T=100, H=1080, W=1920)
-    seed_json, _, info = node.run(
+    seed_json, _, info, _ibp, _ibsp, _ipp, _inp, _ifi = node.run(
         images=images, api=_make_api(), target_description="x",
         keyframe_indices="[5, 13, 25]",
         num_pos_points=3, num_neg_points=1,

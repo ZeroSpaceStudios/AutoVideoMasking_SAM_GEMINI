@@ -732,14 +732,37 @@ class VLMtoBBoxAndPointsMultiFrame:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("seed_prompts", "raw_vlm_responses", "info")
+    RETURN_TYPES = (
+        "STRING",                # seed_prompts (batched v1.4 JSON)
+        "STRING",                # raw_vlm_responses
+        "STRING",                # info
+        # The five "init_*" outputs below are derived from the first accepted
+        # keyframe and reformatted as the typed dicts SAM3VideoSegmentation
+        # expects, so this single node can drive BOTH init and batch-add
+        # without paying for an extra single-frame VLMtoBBoxAndPoints call.
+        "SAM3_BOX_PROMPT",       # init_box_prompt (singular, for SAM3AddPrompt)
+        "SAM3_BOXES_PROMPT",     # init_boxes_prompt (plural, for SAM3VideoSegmentation.positive_boxes)
+        "SAM3_POINTS_PROMPT",    # init_positive_points
+        "SAM3_POINTS_PROMPT",    # init_negative_points
+        "INT",                   # init_frame_idx (the first accepted keyframe; wire to SAM3VideoSegmentation.frame_idx)
+    )
+    RETURN_NAMES = (
+        "seed_prompts", "raw_vlm_responses", "info",
+        "init_box_prompt", "init_boxes_prompt",
+        "init_positive_points", "init_negative_points",
+        "init_frame_idx",
+    )
     FUNCTION     = "run"
     CATEGORY     = "AVM"
     DESCRIPTION  = (
         "Multi-frame Gemini → SAM3 prompt generator. Mirrors VLMtoBBoxAndPoints "
         "per keyframe, batches into a v1.4 sam3_seed_prompts payload for "
-        "SAM3MultiFrameAddPrompt downstream."
+        "SAM3MultiFrameAddPrompt downstream. Also emits init_* outputs derived "
+        "from the first accepted keyframe so SAM3VideoSegmentation init can be "
+        "driven from the same Gemini call set without a separate single-frame "
+        "VLMtoBBoxAndPoints node. Wire init_frame_idx to "
+        "SAM3VideoSegmentation.frame_idx when the keyframe sampler does not "
+        "include frame 0."
     )
 
     def run(self, images, api, target_description, keyframe_indices,
@@ -843,11 +866,41 @@ class VLMtoBBoxAndPointsMultiFrame:
             f"=== t={t} ===\n{raw_by_t.get(t, '')}" for t in kf_list
         )
 
+        # ----- Init outputs: derive from first accepted seed (lowest frame_idx) -----
+        # Same Gemini data the batched payload already paid for. The
+        # SAM3VideoSegmentation node expects positive_boxes as the typed dict
+        # {boxes: [[cx,cy,w,h]], labels: [bool]}; SAM3AddPrompt expects the
+        # singular {box: [cx,cy,w,h], label: bool}. We emit both so either
+        # downstream node wires cleanly.
+        init_seed = seeds_sorted[0]
+        init_frame_idx = int(init_seed["frame_idx"])
+        init_box_vec = list(init_seed["box"])
+        init_pos_pts = list(init_seed.get("pos_pts", []))
+        init_neg_pts = list(init_seed.get("neg_pts", []))
+
+        init_box_prompt = {"box": init_box_vec, "label": True}
+        init_boxes_prompt = {"boxes": [init_box_vec], "labels": [True]}
+        init_positive_points = {
+            "points": init_pos_pts,
+            "labels": [1] * len(init_pos_pts),
+        }
+        init_negative_points = {
+            "points": init_neg_pts,
+            "labels": [0] * len(init_neg_pts),
+        }
+
         print(
-            f"[VLMtoBBoxAndPointsMultiFrame] {summary}"
+            f"[VLMtoBBoxAndPointsMultiFrame] {summary}, "
+            f"init_frame_idx={init_frame_idx}, init_pos={len(init_pos_pts)}, "
+            f"init_neg={len(init_neg_pts)}"
         )
 
-        return (json.dumps(payload), raw_concat, info_str)
+        return (
+            json.dumps(payload), raw_concat, info_str,
+            init_box_prompt, init_boxes_prompt,
+            init_positive_points, init_negative_points,
+            init_frame_idx,
+        )
 
 
 # =============================================================================
