@@ -618,6 +618,60 @@ _AVM_MF_SCHEMA_VERSION = "1.4.0"
 _AVM_MF_SCHEMA_TYPE = "sam3_seed_prompts"
 _AVM_MF_SCHEMA_MINOR_COMPATIBLE_WITH = "1.x"
 
+# Quick-pick subject presets for VLMtoBBoxAndPointsMultiFrame.
+# Sentinel "custom" at index 0 per D-349 (sentinel-FIRST cross-suite rule)
+# so legacy saved workflows that didn't have this widget default to the
+# back-compat free-form path (target_description is used verbatim).
+#
+# Resolution at run():
+#   target_preset == "custom" -> send target_description as-is to Gemini
+#   target_preset != "custom" + target_description is empty/default ->
+#     send the preset's canned text only
+#   target_preset != "custom" + target_description has user text ->
+#     compose: "<preset_canned>, <target_description>" so refinements
+#     append cleanly to the preset baseline.
+_AVM_MF_TARGET_PRESETS = {
+    "custom":           None,  # sentinel — uses target_description verbatim
+    "face":             "the subject's face",
+    "head":             "the subject's entire head, including hair",
+    "head_and_shoulders": "the subject's head and shoulders",
+    "upper_body":       "the subject's upper body, torso, and arms",
+    "full_body":        "the subject's full body",
+    "hair":             "the subject's hair",
+    "hands":            "the subject's hands, wrists, and fingers",
+    "clothing_top":     "the subject's shirt, jacket, or top garment",
+    "clothing_bottom":  "the subject's pants, skirt, or bottom garment",
+    "footwear":         "the subject's shoes or footwear",
+    "prop_held":        "the prop or object the subject is holding",
+}
+# Default target_description value — used to detect "user hasn't overridden"
+# when composing preset + description. Keep in sync with the widget default
+# (line cross-ref: target_description STRING default in INPUT_TYPES below).
+_AVM_MF_DEFAULT_TARGET_DESCRIPTION = "the main subject"
+
+
+def _resolve_target_subject(target_preset: str, target_description: str) -> str:
+    """Apply target_preset + target_description composition rules.
+
+    See _AVM_MF_TARGET_PRESETS docstring for resolution table.
+    Raises ValueError on unknown preset.
+    """
+    if target_preset not in _AVM_MF_TARGET_PRESETS:
+        raise ValueError(
+            f"[VLMtoBBoxAndPointsMultiFrame] unknown target_preset "
+            f"'{target_preset}'. Supported: {list(_AVM_MF_TARGET_PRESETS.keys())}"
+        )
+    preset_text = _AVM_MF_TARGET_PRESETS[target_preset]
+    desc = (target_description or "").strip()
+    if preset_text is None:
+        # custom mode — verbatim description (current/default behavior)
+        return desc if desc else _AVM_MF_DEFAULT_TARGET_DESCRIPTION
+    # Preset path — compose if user added meaningful detail beyond the default
+    has_user_detail = bool(desc) and desc != _AVM_MF_DEFAULT_TARGET_DESCRIPTION
+    if has_user_detail:
+        return f"{preset_text}, {desc}"
+    return preset_text
+
 
 def _parse_keyframe_indices_strict(s: str, total_frames: int):
     """Validate keyframe_indices STRING pre-dispatch.
@@ -726,6 +780,25 @@ class VLMtoBBoxAndPointsMultiFrame:
                                                     "tooltip": "Max concurrent Gemini calls. One call per keyframe; fanned out in batches."}),
                 "obj_id":             ("INT", {"default": 1, "min": 1, "max": 100,
                                                     "tooltip": "SAM3 obj_id for every emitted seed. Match downstream Multi-Frame Add Prompt."}),
+                # Appended at END of required block per D-201 — inserting
+                # mid-schema would scramble widgets_values on saved workflows.
+                # 'custom' sentinel is at index 0 of _AVM_MF_TARGET_PRESETS so
+                # legacy workflows default to the free-form behavior.
+                "target_preset":      (list(_AVM_MF_TARGET_PRESETS.keys()), {
+                    "default": "custom",
+                    "tooltip": (
+                        "Quick-pick subject for common workflows. "
+                        "'custom' uses target_description verbatim (default / "
+                        "back-compat). Other presets supply a canned subject "
+                        "phrase; if target_description has user-added detail "
+                        "beyond the default, it gets appended for refinement "
+                        "(e.g. 'face' + 'wearing glasses' -> 'the subject's "
+                        "face, wearing glasses'). NOTE: the resolver does NOT "
+                        "deduplicate — if your description repeats the preset "
+                        "text, the prompt will too (intentional, lets you "
+                        "emphasize)."
+                    ),
+                }),
             },
             "optional": {
                 "few_shot_examples": ("STRING", {"default": "", "multiline": True}),
@@ -767,7 +840,7 @@ class VLMtoBBoxAndPointsMultiFrame:
 
     def run(self, images, api, target_description, keyframe_indices,
             num_pos_points, num_neg_points, parallel_call_count,
-            obj_id, few_shot_examples=""):
+            obj_id, target_preset="custom", few_shot_examples=""):
         import concurrent.futures
 
         # ----- Input shape + validation -----
@@ -782,11 +855,18 @@ class VLMtoBBoxAndPointsMultiFrame:
 
         kf_list = _parse_keyframe_indices_strict(keyframe_indices, total_frames)
 
+        # Resolve effective subject text from target_preset + target_description.
+        # custom -> verbatim description; preset -> preset text (with optional
+        # description appended as refinement). See _resolve_target_subject for
+        # the composition table.
+        effective_target = _resolve_target_subject(target_preset, target_description)
+
         few_shot_block = "\n\nExamples:\n" + few_shot_examples.strip() if few_shot_examples.strip() else ""
 
         print(
             f"[VLMtoBBoxAndPointsMultiFrame] T={total_frames}, frame={W}x{H}, "
-            f"kf={kf_list}, parallel={parallel_call_count}, model={api.get('model_name')}"
+            f"kf={kf_list}, parallel={parallel_call_count}, model={api.get('model_name')}, "
+            f"target_preset={target_preset!r}, effective_target={effective_target!r}"
         )
 
         # ----- Build per-keyframe call tasks -----
@@ -797,7 +877,7 @@ class VLMtoBBoxAndPointsMultiFrame:
             single_batch = images[t:t+1]
             pil_img = _tensor_to_pil(single_batch)
             pW, pH = pil_img.size
-            prompt = bbox_and_points_prompt(target_description, pW, pH, num_pos_points, num_neg_points, few_shot_block)
+            prompt = bbox_and_points_prompt(effective_target, pW, pH, num_pos_points, num_neg_points, few_shot_block)
             raw = _call_gemini(pil_img, prompt, api)
             seed = _seed_from_bbox_and_points_response(
                 raw, frame_idx=t, obj_id=obj_id, num_pos=num_pos_points, num_neg=num_neg_points, W=pW, H=pH
@@ -841,7 +921,16 @@ class VLMtoBBoxAndPointsMultiFrame:
             "schema_version": _AVM_MF_SCHEMA_VERSION,
             "schema_minor_compatible_with": _AVM_MF_SCHEMA_MINOR_COMPATIBLE_WITH,
             "generator_node": "VLMtoBBoxAndPointsMultiFrame",
+            # `target_description` records the RAW widget value (semantic
+            # contract: it's what the user typed). `effective_target_description`
+            # records what was actually sent to Gemini after target_preset
+            # resolution. Emitting both avoids silent contract drift if a
+            # downstream consumer interpreted `target_description` as raw
+            # input — they get the raw value, plus a clearly-named effective
+            # field for the resolved prompt.
             "target_description": target_description,
+            "effective_target_description": effective_target,
+            "target_preset": target_preset,
             "frame_width": W,
             "frame_height": H,
             "total_frames": total_frames,

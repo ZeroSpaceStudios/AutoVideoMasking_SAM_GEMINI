@@ -54,6 +54,9 @@ _bridge_mod = _load("vlm_sam3_bridge.py", f"{_pkg_name}.vlm_sam3_bridge")
 
 VLMtoBBoxAndPointsMultiFrame = _bridge_mod.VLMtoBBoxAndPointsMultiFrame
 _parse_keyframe_indices_strict = _bridge_mod._parse_keyframe_indices_strict
+_resolve_target_subject = _bridge_mod._resolve_target_subject
+_AVM_MF_TARGET_PRESETS = _bridge_mod._AVM_MF_TARGET_PRESETS
+_AVM_MF_DEFAULT_TARGET_DESCRIPTION = _bridge_mod._AVM_MF_DEFAULT_TARGET_DESCRIPTION
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +306,130 @@ def test_invalid_image_shape_raises_with_diagnostic(monkeypatch):
 # ---------------------------------------------------------------------------
 # Init outputs (Strategy C — single-node init + batch)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# target_preset resolution (quick-pick subject presets)
+# ---------------------------------------------------------------------------
+
+def test_resolve_custom_returns_description_verbatim():
+    """custom preset = back-compat — target_description used verbatim."""
+    assert _resolve_target_subject("custom", "the boxer in red jacket") == "the boxer in red jacket"
+
+
+def test_resolve_custom_with_empty_description_falls_back_to_default():
+    """custom + empty description → the default 'the main subject' baseline."""
+    assert _resolve_target_subject("custom", "") == _AVM_MF_DEFAULT_TARGET_DESCRIPTION
+    assert _resolve_target_subject("custom", "   ") == _AVM_MF_DEFAULT_TARGET_DESCRIPTION
+
+
+def test_resolve_preset_with_default_description_uses_preset_only():
+    """preset + default description (user didn't override) → preset text alone."""
+    # default "the main subject" treated as 'no user detail'
+    assert _resolve_target_subject("face", _AVM_MF_DEFAULT_TARGET_DESCRIPTION) == "the subject's face"
+    assert _resolve_target_subject("hair", "") == "the subject's hair"
+
+
+def test_resolve_preset_with_user_detail_composes():
+    """preset + meaningful description → composed prompt for refinement."""
+    out = _resolve_target_subject("face", "wearing red sunglasses")
+    assert out == "the subject's face, wearing red sunglasses"
+    out2 = _resolve_target_subject("hair", "dyed pink, shoulder-length")
+    assert out2 == "the subject's hair, dyed pink, shoulder-length"
+
+
+def test_resolve_unknown_preset_raises():
+    """Unknown preset name raises with a diagnostic list of valid choices."""
+    with pytest.raises(ValueError, match="unknown target_preset"):
+        _resolve_target_subject("not_a_preset", "ignored")
+
+
+def test_target_preset_table_starts_with_custom_sentinel():
+    """D-349 sentinel-FIRST: 'custom' must be at index 0 of the choices list
+    so legacy saved workflows without this widget default to the back-compat
+    free-form behavior."""
+    keys = list(_AVM_MF_TARGET_PRESETS.keys())
+    assert keys[0] == "custom", f"expected 'custom' at index 0, got {keys[:3]}"
+
+
+def test_producer_run_with_preset_overrides_description(monkeypatch):
+    """End-to-end: producer with target_preset='face' + default description
+    sends 'the subject's face' to Gemini (verified via the canned prompt that
+    gets passed through). The payload's effective target_description should
+    reflect the preset-resolved text, not the raw widget value."""
+    captured_prompts = []
+
+    def capture_prompt(pil_img, prompt, api):
+        captured_prompts.append(prompt)
+        return _make_canned_response()
+
+    _install_gemini_mock(monkeypatch, response_factory=capture_prompt)
+    node = VLMtoBBoxAndPointsMultiFrame()
+    images = FakeImages(T=100, H=1080, W=1920)
+    out = node.run(
+        images=images, api=_make_api(),
+        target_description=_AVM_MF_DEFAULT_TARGET_DESCRIPTION,  # the default
+        target_preset="face",
+        keyframe_indices="[5]",
+        num_pos_points=3, num_neg_points=1,
+        parallel_call_count=1, obj_id=1,
+    )
+    # The prompt sent to Gemini contains the preset-resolved subject text
+    assert len(captured_prompts) == 1
+    assert "the subject's face" in captured_prompts[0]
+    # Payload records BOTH the raw widget value AND the effective resolved text
+    # (avoids semantic drift for any downstream consumer of target_description).
+    payload = json.loads(out[0])
+    assert payload["target_description"] == _AVM_MF_DEFAULT_TARGET_DESCRIPTION, (
+        "raw target_description should record the widget value, not the resolved text"
+    )
+    assert payload["effective_target_description"] == "the subject's face"
+    assert payload["target_preset"] == "face"
+
+
+def test_producer_run_with_preset_and_refinement_composes(monkeypatch):
+    """End-to-end: target_preset='hair' + target_description='dyed pink' →
+    composed prompt 'the subject's hair, dyed pink'."""
+    captured_prompts = []
+    def capture(pil_img, prompt, api):
+        captured_prompts.append(prompt)
+        return _make_canned_response()
+    _install_gemini_mock(monkeypatch, response_factory=capture)
+    node = VLMtoBBoxAndPointsMultiFrame()
+    images = FakeImages(T=100, H=1080, W=1920)
+    out = node.run(
+        images=images, api=_make_api(),
+        target_description="dyed pink",
+        target_preset="hair",
+        keyframe_indices="[10]",
+        num_pos_points=3, num_neg_points=1,
+        parallel_call_count=1, obj_id=1,
+    )
+    assert "the subject's hair, dyed pink" in captured_prompts[0]
+    payload = json.loads(out[0])
+    # Raw widget value preserved; effective records the composed result
+    assert payload["target_description"] == "dyed pink"
+    assert payload["effective_target_description"] == "the subject's hair, dyed pink"
+
+
+def test_resolve_duplicate_preset_text_in_description_pins_intentional_no_dedupe():
+    """Edge case pin: when description text matches/contains the preset text,
+    the resolver does NOT silently deduplicate. Users get exactly what they
+    typed plus the preset baseline. This is deliberate — silent dedup would
+    surprise users who genuinely want emphasis (e.g., 'face' + 'face only, not
+    hair' is a valid refinement). Tooltip on the widget documents this."""
+    # preset=face, desc=preset-equivalent text → composes verbatim (caller's
+    # choice, no dedup). The Gemini prompt will read "the subject's face,
+    # the subject's face" — accepted as user intent.
+    out = _resolve_target_subject("face", "the subject's face")
+    assert out == "the subject's face, the subject's face"
+
+
+def test_hands_preset_resolves_correctly():
+    """Hands preset (folded in per R3): one of the most-requested capabilities
+    in VFX object-interaction workflows."""
+    assert _resolve_target_subject("hands", _AVM_MF_DEFAULT_TARGET_DESCRIPTION) == "the subject's hands, wrists, and fingers"
+    assert _resolve_target_subject("hands", "holding a knife") == "the subject's hands, wrists, and fingers, holding a knife"
+
 
 def test_init_outputs_derived_from_first_accepted_seed(monkeypatch):
     """Init outputs are reformatted from the first accepted seed (lowest
